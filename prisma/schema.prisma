@@ -1,0 +1,113 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String?   @unique
+  handle        String    @unique
+  avatar        String?
+  balance       Float     @default(10000)
+  createdAt     DateTime  @default(now())
+  bets          Bet[]
+  comments      Comment[]
+  likes         Like[]
+  saves         Save[]
+  following     Follow[]  @relation("follower")
+  followers     Follow[]  @relation("following")
+  waitlist      Waitlist?
+  events        AnalyticsEvent[]
+}
+
+model Market {
+  id            String    @id @default(cuid())
+  title         String
+  description   String
+  category      String
+  imageUrl      String
+  yesPercent    Float     @default(50)
+  noPercent     Float     @default(50)
+  totalPool     Float     @default(0)
+  bettorsCount  Int       @default(0)
+  expiresAt     DateTime
+  createdAt     DateTime  @default(now())
+  creatorId     String
+  bets          Bet[]
+  comments      Comment[]
+  likes         Like[]
+  saves         Save[]
+}
+
+model Bet {
+  id        String   @id @default(cuid())
+  userId    String
+  marketId  String
+  amount    Float
+  side      String   // "YES" or "NO"
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  market    Market   @relation(fields: [marketId], references: [id])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  userId    String
+  marketId  String
+  content   String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  market    Market   @relation(fields: [marketId], references: [id])
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  userId    String
+  marketId  String
+  user      User     @relation(fields: [userId], references: [id])
+  market    Market   @relation(fields: [marketId], references: [id])
+
+  @@unique([userId, marketId])
+}
+
+model Save {
+  id        String   @id @default(cuid())
+  userId    String
+  marketId  String
+  user      User     @relation(fields: [userId], references: [id])
+  market    Market   @relation(fields: [marketId], references: [id])
+
+  @@unique([userId, marketId])
+}
+
+model Follow {
+  id          String @id @default(cuid())
+  followerId  String
+  followingId String
+  follower    User   @relation("follower", fields: [followerId], references: [id])
+  following   User   @relation("following", fields: [followingId], references: [id])
+
+  @@unique([followerId, followingId])
+}
+
+model Waitlist {
+  id             String   @id @default(cuid())
+  email          String
+  intendedAmount Float
+  userId         String?  @unique
+  createdAt      DateTime @default(now())
+  user           User?    @relation(fields: [userId], references: [id])
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(cuid())
+  eventName String
+  userId    String?
+  metadata  String?  // JSON string
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
+}
