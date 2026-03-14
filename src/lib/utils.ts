@@ -14,9 +14,24 @@ export const formatCurrency = (value: number) => {
 };
 
 export const formatPrice = (amount: number, language: 'en' | 'ru', isDemo: boolean = false) => {
-  const formatted = formatCurrency(amount);
+  // Assume base amount is in RUB (Russian Rubles)
+  // Current approximate exchange rate: 1 USD = 90 RUB
+  const exchangeRate = 90;
+  
+  let displayAmount = amount;
+  let currencySymbol = language === 'ru' ? "₽" : "$";
+  
+  if (language === 'en') {
+    displayAmount = amount / exchangeRate;
+  }
+
+  const formatted = new Intl.NumberFormat(language === 'ru' ? 'ru-RU' : 'en-US', {
+    style: 'decimal',
+    minimumFractionDigits: language === 'en' ? 2 : 0,
+    maximumFractionDigits: language === 'en' ? 2 : 0,
+  }).format(displayAmount);
+
   const demoPrefix = language === 'ru' ? "Демо" : "Demo";
-  const currencySymbol = language === 'ru' ? "₽" : "$";
   
   if (isDemo) return `${demoPrefix} ${formatted}`;
   return language === 'ru' ? `${formatted} ${currencySymbol}` : `${currencySymbol}${formatted}`;
