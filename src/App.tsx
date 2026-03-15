@@ -143,7 +143,7 @@ const GlassCard = ({ children, className }: any) => (
 type View = 'feed' | 'rank' | 'create' | 'history' | 'profile' | 'saved' | 'admin';
 
 export default function App() {
-  const { user, isLoggedIn, setUser, language, setLanguage, isRealMode, setIsRealMode } = useAuthStore();
+  const { user, isLoggedIn, setUser, language, setLanguage, isRealMode, setIsRealMode, demoBalance, setDemoBalance } = useAuthStore();
   const t = translations[language];
   const [markets, setMarkets] = useState<Market[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -233,6 +233,11 @@ export default function App() {
   }, [markets.length, currentIndex]);
 
   const handleRefill = () => {
+    if (!isRealMode) {
+      setDemoBalance(10000);
+      showToast("Demo balance refilled!", 'success');
+      return;
+    }
     setShowBetModal(null);
     setShowTopUpModal(true);
   };
@@ -256,6 +261,19 @@ export default function App() {
 
     if (!isLoggedIn || !user?.id) {
       setShowAuthModal(true);
+      return;
+    }
+
+    if (!isRealMode) {
+      // Demo mode logic
+      if (amount > demoBalance) {
+        showToast("Insufficient demo balance", 'error');
+        return;
+      }
+      setDemoBalance(demoBalance - amount);
+      setConfirmBet({ side, amount });
+      setShowBetModal(null);
+      showToast("Demo bet placed successfully!", 'success');
       return;
     }
 
@@ -340,13 +358,27 @@ export default function App() {
         body: JSON.stringify({ email, handle })
       });
       
-      const data = await res.json();
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        if (text.includes("Starting Server...")) {
+          showToast("Server is still starting. Please wait a few seconds and try again.", 'info');
+        } else {
+          console.error("Server returned non-JSON:", text);
+          showToast("Server error. Please try again later.", 'error');
+        }
+        return;
+      }
+
       if (!res.ok) {
         showToast(data.error || 'Login failed', 'error');
         return;
       }
 
       setUser(data);
+      setIsRealMode(true);
       setShowAuthModal(false);
       trackEvent('login_success', data.id);
 
@@ -724,13 +756,13 @@ export default function App() {
                     className="flex items-center gap-2 bg-zinc-900/80 px-3 py-1.5 rounded-full border border-white/5 whitespace-nowrap hover:bg-zinc-800 transition-colors"
                   >
                     <Wallet size={14} className="text-emerald-500" />
-                    <span className="text-sm font-bold">{formatPrice(user!.balance, language)}</span>
+                    <span className="text-sm font-bold">{formatPrice(isRealMode ? user!.balance : demoBalance, language)}</span>
                   </button>
-                  {user!.balance < 100 && (
+                  {((isRealMode ? user!.balance : demoBalance) < 100) && (
                     <button 
                       onClick={handleRefill}
                       className="bg-emerald-500/10 text-emerald-500 p-1.5 rounded-full hover:bg-emerald-500/20 transition-all"
-                      title="Refill Balance"
+                      title={isRealMode ? "Refill Balance" : "Refill Demo Balance"}
                     >
                       <Plus size={14} />
                     </button>
@@ -864,7 +896,7 @@ export default function App() {
               key="bet-modal"
               market={showBetModal.market} 
               side={showBetModal.side} 
-              userBalance={user?.balance || 1000000}
+              userBalance={isRealMode ? (user?.balance || 0) : demoBalance}
               onClose={() => setShowBetModal(null)}
               onConfirm={onConfirmBet}
               onRefill={handleRefill}
@@ -1154,7 +1186,7 @@ function HistoryView({ userId }: { userId?: string }) {
 }
 
 function ProfileView({ user, onLogout, onSavedClick, onAdminClick, onTopUp }: { user: any; onLogout: () => void; onSavedClick: () => void; onAdminClick: () => void; onTopUp: () => void }) {
-  const { language, setLanguage, isRealMode, setIsRealMode } = useAuthStore();
+  const { language, setLanguage, isRealMode, setIsRealMode, demoBalance } = useAuthStore();
   const t = translations[language];
 
   // Stable pseudo-random win rate based on user ID
@@ -1192,7 +1224,7 @@ function ProfileView({ user, onLogout, onSavedClick, onAdminClick, onTopUp }: { 
           onClick={onTopUp}
           className="flex flex-col items-center py-6 relative overflow-hidden group cursor-pointer hover:bg-white/5 transition-colors"
         >
-          <span className="text-3xl font-black text-emerald-400 whitespace-nowrap">{formatPrice(user.balance, language)}</span>
+          <span className="text-3xl font-black text-emerald-400 whitespace-nowrap">{formatPrice(isRealMode ? user.balance : demoBalance, language)}</span>
           <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mt-1">{t.credits}</span>
           <div className="absolute inset-x-0 bottom-0 bg-emerald-500 text-black text-[10px] font-black py-1 uppercase tracking-tighter translate-y-full group-hover:translate-y-0 transition-transform text-center">
             {t.topUp}
@@ -2168,7 +2200,7 @@ function BetModal({ market, side, userBalance, onClose, onConfirm, onRefill }: {
   onConfirm: (amount: number) => void;
   onRefill?: () => void;
 }) {
-  const { language } = useAuthStore();
+  const { language, isRealMode } = useAuthStore();
   const t = translations[language];
   const [amount, setAmount] = useState<number>(100);
   const chips = [50, 100, 250, 500, 1000];
@@ -2187,7 +2219,7 @@ function BetModal({ market, side, userBalance, onClose, onConfirm, onRefill }: {
         </div>
 
         <div className="mb-6">
-          <p className="text-zinc-400 text-sm mb-2">{t.predict} <span className={cn("font-bold", side === 'YES' ? "text-emerald-500" : "text-rose-500")}>{side}</span> on:</p>
+          <p className="text-zinc-400 text-sm mb-2">{t.predict} <span className={cn("font-bold", side === 'YES' ? "text-emerald-500" : "text-rose-500")}>{side}</span> {t.on}:</p>
           <h3 className="font-bold leading-tight">{market.title}</h3>
         </div>
 
@@ -2209,7 +2241,7 @@ function BetModal({ market, side, userBalance, onClose, onConfirm, onRefill }: {
                   className="bg-transparent text-right text-2xl font-bold focus:outline-none w-24 border-b border-white/10"
                 />
               </div>
-              <span className="text-zinc-500 text-xs">Balance: {formatPrice(userBalance, language, true)}</span>
+              <span className="text-zinc-500 text-xs">Balance: {formatPrice(userBalance, language, !isRealMode)}</span>
             </div>
           </div>
           <div className="flex flex-wrap gap-2 mb-6">
@@ -2229,15 +2261,15 @@ function BetModal({ market, side, userBalance, onClose, onConfirm, onRefill }: {
 
           <div className="bg-zinc-800/50 rounded-2xl p-4 border border-white/5">
             <div className="flex justify-between items-center mb-2">
-              <span className="text-zinc-400 text-sm">Potential Payout</span>
+              <span className="text-zinc-400 text-sm">{t.potentialPayout}</span>
               <span className="font-bold text-emerald-500">
-                {formatPrice(amount / (Math.max(1, side === 'YES' ? market.yesPercent : market.noPercent) / 100), language, true)}
+                {formatPrice(amount / (Math.max(1, side === 'YES' ? market.yesPercent : market.noPercent) / 100), language, !isRealMode)}
               </span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-zinc-400 text-sm">Potential Profit</span>
+              <span className="text-zinc-400 text-sm">{t.potentialProfit}</span>
               <span className="font-bold text-emerald-400">
-                +{formatPrice((amount / (Math.max(1, side === 'YES' ? market.yesPercent : market.noPercent) / 100)) - amount, language, true)}
+                +{formatPrice((amount / (Math.max(1, side === 'YES' ? market.yesPercent : market.noPercent) / 100)) - amount, language, !isRealMode)}
               </span>
             </div>
           </div>
@@ -2691,7 +2723,7 @@ function WelcomeModal({ onClose, onTopUp }: { onClose: () => void; onTopUp: () =
 }
 
 function WalletModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (amount: number) => void }) {
-  const { user, language } = useAuthStore();
+  const { user, language, isRealMode } = useAuthStore();
   const t = translations[language];
   const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw'>('deposit');
   const [amount, setAmount] = useState<string>('1000');
@@ -2747,6 +2779,15 @@ function WalletModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
         <h2 className="text-xl font-bold">{t.wallet}</h2>
         <button onClick={onClose} className="p-2 hover:bg-zinc-800 rounded-full"><X size={20} /></button>
       </div>
+
+      {!isRealMode && (
+        <div className="mb-6 p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-start gap-3">
+          <AlertCircle size={18} className="text-amber-500 shrink-0 mt-0.5" />
+          <p className="text-[10px] text-amber-200/80 leading-relaxed font-medium">
+            You are currently in Demo Mode. Deposits will be credited to your main balance.
+          </p>
+        </div>
+      )}
 
       <div className="flex gap-2 mb-8 p-1 bg-zinc-800/50 rounded-2xl border border-white/5">
         <button 

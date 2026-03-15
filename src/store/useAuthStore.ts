@@ -15,10 +15,12 @@ interface AuthState {
   hasDoneFakeBet: boolean;
   language: 'en' | 'ru';
   isRealMode: boolean;
+  demoBalance: number;
   setUser: (user: User | null) => void;
   setHasDoneFakeBet: (val: boolean) => void;
   setLanguage: (lang: 'en' | 'ru') => void;
   setIsRealMode: (val: boolean) => void;
+  setDemoBalance: (val: number) => void;
   logout: () => void;
 }
 
@@ -29,11 +31,13 @@ export const useAuthStore = create<AuthState>()(
       isLoggedIn: false,
       hasDoneFakeBet: false,
       language: 'en',
-      isRealMode: false,
+      isRealMode: true,
+      demoBalance: 10000,
       setUser: (user) => set({ user, isLoggedIn: !!user }),
       setHasDoneFakeBet: (val) => set({ hasDoneFakeBet: val }),
       setLanguage: (language) => set({ language }),
       setIsRealMode: (isRealMode) => set({ isRealMode }),
+      setDemoBalance: (demoBalance) => set({ demoBalance }),
       logout: () => set({ user: null, isLoggedIn: false }),
     }),
     {

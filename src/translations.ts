@@ -84,6 +84,9 @@ export const translations = {
     cryptoNote: "Secure crypto payments via NOWPayments",
     totalWon: "Total Won",
     grantWinnings: "Grant Winnings",
+    potentialPayout: "Potential Payout",
+    potentialProfit: "Potential Profit",
+    on: "on",
   },
   ru: {
     demo: "Демо",
@@ -170,5 +173,8 @@ export const translations = {
     cryptoNote: "Безопасные крипто-платежи через NOWPayments",
     totalWon: "Всего выиграно",
     grantWinnings: "Выдать выигрыш",
+    potentialPayout: "Потенциальная выплата",
+    potentialProfit: "Потенциальная прибыль",
+    on: "на",
   }
 };

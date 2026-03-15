@@ -3,10 +3,21 @@ import { createServer as createViteServer } from "vite";
 import { PrismaClient } from "@prisma/client";
 import path from "path";
 import crypto from "crypto";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const prisma = new PrismaClient();
 const app = express();
 const PORT = 3000;
+
+app.use((req, res, next) => {
+  if (req.url.startsWith('/api')) {
+    console.log(`${req.method} ${req.url}`);
+  }
+  next();
+});
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -745,22 +756,35 @@ app.post("/api/auth/mock", async (req, res) => {
 });
 
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    app.use(express.static(path.join(__dirname, "dist")));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(__dirname, "dist", "index.html"));
-    });
-  }
+  console.log("Starting server...");
+  try {
+    console.log("Testing database connection...");
+    await prisma.$connect();
+    console.log("Database connected successfully.");
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+    if (process.env.NODE_ENV !== "production") {
+      console.log("Initializing Vite in middleware mode...");
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+      console.log("Vite middleware initialized.");
+    } else {
+      const distPath = path.join(process.cwd(), "dist");
+      app.use(express.static(distPath));
+      app.get("*", (req, res) => {
+        res.sendFile(path.join(distPath, "index.html"));
+      });
+    }
+
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  } catch (error) {
+    console.error("Failed to start server:", error);
+    process.exit(1);
+  }
 }
 
 // Global error handler
