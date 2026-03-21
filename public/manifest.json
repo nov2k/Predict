@@ -1,0 +1,16 @@
+{
+  "name": "Predi Club",
+  "short_name": "Predi",
+  "description": "Prediction Market — Swipe, Predict, Earn",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#10b981",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "inbounds": [
+    {
+      "tag": "socks-in",
+      "port": 10808,
+      "listen": "127.0.0.1",
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": true
+      }
+    },
+    {
+      "tag": "http-in",
+      "port": 10809,
+      "listen": "127.0.0.1",
+      "protocol": "http",
+      "settings": {}
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "vless-out",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "nl1.gofizzin.com",
+            "port": 443,
+            "users": [
+              {
+                "id": "1c3569a1-ffde-4ab4-9aca-8499073e2316",
+                "encryption": "none",
+                "flow": "xtls-rprx-vision"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "nl1.gofizzin.com",
+          "fingerprint": "chrome",
+          "publicKey": "yvYNgYXNwbIBZ0PRhe_kE24DBdvQHT4uEkKJwzjxIiI",
+          "shortId": "4a1f9d0a",
+          "spiderX": "/VGISlCyjVgul8BN"
+        }
+      }
+    }
+  ]
+}

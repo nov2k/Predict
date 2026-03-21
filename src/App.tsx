@@ -1,125 +1,229 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence, useScroll, useTransform } from 'motion/react';
-import { 
-  TrendingUp, 
-  MessageCircle, 
-  Heart, 
-  Share2, 
-  Bookmark, 
-  ChevronUp, 
-  ChevronDown,
+import React, { useEffect, useRef, useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import confetti from 'canvas-confetti';
+import {
+  TrendingUp,
+  Search,
+  X,
   Wallet,
+  Plus,
+  History,
   User as UserIcon,
   Trophy,
-  Plus,
-  ArrowUpRight,
-  CheckCircle2,
-  X,
-  Info,
-  History,
-  ArrowLeft
 } from 'lucide-react';
-import { 
-  LineChart, 
-  Line, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer,
-  AreaChart,
-  Area
-} from 'recharts';
-import { cn, formatCurrency, formatPrice, trackEvent } from './lib/utils';
+import { cn, formatPrice, trackEvent } from './lib/utils';
 import { useAuthStore } from './store/useAuthStore';
 import { translations } from './translations';
+import type { AppView, Market } from './types/market';
+import { apiFetch } from './lib/api';
+import { Button } from './components/ui/Button';
+import { getCategories, type CategoryItem } from './constants/categories';
+import { NavButton, SidebarNavButton, Toast } from './components/layout/NavAndToast';
+import { RankingView } from './views/RankingView';
+import { HistoryView } from './views/HistoryView';
+import { ProfileView } from './views/ProfileView';
+import { SavedView } from './views/SavedView';
+import { CreateView } from './views/CreateView';
+import { AdminView } from './views/AdminView';
+import { MarketCard } from './components/market/MarketCard';
+import { BetModal } from './components/market/BetModal';
+import { AuthModal } from './components/auth/AuthModal';
+import { MarketDetail } from './components/market/MarketDetail';
+import {
+  WaitlistModal,
+  BetConfirmation,
+  WelcomeModal,
+  WalletModal,
+  DepositSuccessModal,
+} from './components/modals/ExtraModals';
 
-// --- Types ---
-interface Market {
-  id: string;
-  title: string;
-  description: string;
-  category: string;
-  imageUrl: string;
-  yesPercent: number;
-  noPercent: number;
-  totalPool: number;
-  bettorsCount: number;
-  expiresAt: string;
-  userLiked?: boolean;
-  userSaved?: boolean;
-  _count: {
-    bets: number;
-    comments: number;
-    likes: number;
-  };
-}
-
-// --- Components ---
-
-const Button = ({ className, variant = 'primary', ...props }: any) => {
-  const variants = {
-    primary: 'bg-emerald-500 text-white hover:bg-emerald-600',
-    secondary: 'bg-zinc-800 text-zinc-100 hover:bg-zinc-700',
-    danger: 'bg-rose-500 text-white hover:bg-rose-600',
-    outline: 'border border-zinc-700 text-zinc-300 hover:bg-zinc-800',
-    ghost: 'text-zinc-400 hover:text-white hover:bg-zinc-800/50',
-  };
-  return (
-    <button 
-      className={cn(
-        'px-4 py-2 rounded-xl font-medium transition-all active:scale-95 disabled:opacity-50',
-        variants[variant as keyof typeof variants],
-        className
-      )} 
-      {...props} 
-    />
-  );
-};
-
-const GlassCard = ({ children, className }: any) => (
-  <div className={cn('bg-zinc-900/40 backdrop-blur-md border border-white/5 rounded-2xl p-4', className)}>
-    {children}
-  </div>
-);
-
-// --- Main App ---
-
-type View = 'feed' | 'rank' | 'create' | 'history' | 'profile' | 'saved';
 
 export default function App() {
-  const { user, isLoggedIn, setUser, hasDoneFakeBet, setHasDoneFakeBet, language, setLanguage } = useAuthStore();
+  const { user, token, isLoggedIn, setUser, setToken, language, setLanguage, isRealMode, setIsRealMode, demoBalance, setDemoBalance } = useAuthStore();
   const t = translations[language];
   const [markets, setMarkets] = useState<Market[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [currentView, setCurrentView] = useState<View>('feed');
+  const [currentView, setCurrentView] = useState<AppView>('feed');
   
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [showBetModal, setShowBetModal] = useState<{ market: Market; side: 'YES' | 'NO' } | null>(null);
+  const [showBetModal, setShowBetModal] = useState<{ market: Market; side: string } | null>(null);
   const [showDetail, setShowDetail] = useState<Market | null>(null);
   const [showWaitlist, setShowWaitlist] = useState(false);
-  const [isRealMode, setIsRealMode] = useState(false);
-  const [confirmBet, setConfirmBet] = useState<{ side: 'YES' | 'NO'; amount: number } | null>(null);
+  const [confirmBet, setConfirmBet] = useState<{ side: string; amount: number } | null>(null);
+  const [swipeDirection, setSwipeDirection] = useState<'up' | 'down' | null>(null);
+  const [showDepositSuccess, setShowDepositSuccess] = useState<{ amount: number } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [showWelcomeModal, setShowWelcomeModal] = useState(false);
+  const [showTopUpModal, setShowTopUpModal] = useState(false);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+  const [selectedCategory, setSelectedCategory] = useState<CategoryItem | null>(null);
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+  const isSharing = useRef(false);
+  const verifyUserSeq = useRef(0);
 
   useEffect(() => {
-    const fetchMarkets = async () => {
-      const url = user?.id ? `/api/markets?userId=${user.id}` : '/api/markets';
-      const res = await fetch(url);
-      const data = await res.json();
-      setMarkets(data);
-    };
-    fetchMarkets();
-    trackEvent('app_load');
+    if (user && !token) {
+      useAuthStore.getState().logout();
+    }
+  }, [user, token]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const seq = ++verifyUserSeq.current;
+    const uid = user.id;
+    (async () => {
+      try {
+        const res = await apiFetch(`/api/users/${uid}`);
+        if (seq !== verifyUserSeq.current) return;
+        if (res.status === 401 || res.status === 403 || res.status === 404) {
+          console.log("User session invalid (not in DB), logging out...");
+          useAuthStore.getState().logout();
+        } else if (res.ok) {
+          const updatedUser = await res.json();
+          if (seq !== verifyUserSeq.current) return;
+          setUser(updatedUser);
+        }
+      } catch (e) {
+        console.error("Failed to verify user:", e);
+      }
+    })();
+  }, [user?.id, setUser]);
+
+  // Auto-refresh balance every 30s (read fresh user from store to avoid stale closures)
+  useEffect(() => {
+    if (!user?.id) return;
+    const interval = setInterval(async () => {
+      try {
+        const uid = useAuthStore.getState().user?.id;
+        if (!uid) return;
+        const res = await apiFetch(`/api/users/${uid}`);
+        if (res.ok) {
+          const data = await res.json();
+          const cur = useAuthStore.getState().user;
+          if (cur && data.balance !== cur.balance) {
+            useAuthStore.getState().setUser({ ...cur, ...data });
+          }
+        } else if (res.status === 401 || res.status === 403) {
+          useAuthStore.getState().logout();
+        }
+      } catch {
+        /* ignore */
+      }
+    }, 30000);
+    return () => clearInterval(interval);
   }, [user?.id]);
 
-  const handleBetClick = (market: Market, side: 'YES' | 'NO') => {
-    if (!isLoggedIn && hasDoneFakeBet) {
+  const loadingMore = useRef(false);
+  const hasMore = useRef(true);
+  const fetchVersion = useRef(0);
+
+  const fetchMarkets = async (categorySearch: string | undefined, append: boolean, version: number) => {
+    if (append && (loadingMore.current || !hasMore.current)) return;
+    if (append) loadingMore.current = true;
+    try {
+      const offset = append ? markets.length : 0;
+      let url = `/api/markets?limit=100&offset=${offset}`;
+      if (categorySearch) {
+        url += `&search=${encodeURIComponent(categorySearch)}`;
+      }
+      const res = await apiFetch(url);
+      if (version !== fetchVersion.current) return; // stale request
+
+      if (user?.id && (res.status === 401 || res.status === 404)) {
+        setUser(null);
+        return;
+      }
+
+      const data = await res.json();
+      if (version !== fetchVersion.current) return; // stale request
+
+      if (!res.ok) {
+        if (!append) {
+          setMarkets([]);
+          showToast(t.feedLoadError, 'error');
+        } else {
+          showToast(t.feedLoadMoreError, 'error');
+        }
+        return;
+      }
+
+      if (Array.isArray(data)) {
+        if (append) {
+          const newMarkets = data.filter((m: any) => !markets.some(em => em.id === m.id));
+          if (newMarkets.length === 0) hasMore.current = false;
+          else setMarkets(prev => [...prev, ...newMarkets]);
+        } else {
+          setMarkets(data);
+          hasMore.current = data.length >= 100;
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch markets:', e);
+      if (!append) {
+        setMarkets([]);
+        showToast(t.feedLoadError, 'error');
+      } else {
+        showToast(t.feedLoadMoreError, 'error');
+      }
+    } finally {
+      loadingMore.current = false;
+    }
+  };
+
+  useEffect(() => {
+    hasMore.current = true;
+    fetchVersion.current++;
+    const v = fetchVersion.current;
+    setMarkets([]);
+    setCurrentIndex(0);
+    fetchMarkets(selectedCategory?.search, false, v);
+    trackEvent('app_load');
+  }, [user?.id, selectedCategory]);
+
+  // Load more when approaching end of feed
+  useEffect(() => {
+    if (markets.length > 0 && currentIndex >= markets.length - 5 && hasMore.current) {
+      fetchMarkets(selectedCategory?.search, true, fetchVersion.current);
+    }
+  }, [currentIndex, markets.length]);
+
+  useEffect(() => {
+    if (markets.length > 0) {
+      if (currentIndex >= markets.length) {
+        setCurrentIndex(markets.length - 1);
+      } else if (currentIndex < 0) {
+        setCurrentIndex(0);
+      }
+    }
+  }, [markets.length, currentIndex]);
+
+  const handleRefill = () => {
+    if (!isRealMode) {
+      setDemoBalance(10000);
+      showToast(t.demoRefilled, 'success');
+      return;
+    }
+    if (!isLoggedIn) {
       setShowAuthModal(true);
-      trackEvent('login_wall_shown', undefined, { marketId: market.id });
+      return;
+    }
+    setShowBetModal(null);
+    setShowTopUpModal(true);
+  };
+
+  const handleBetClick = (market: Market, side: string) => {
+    if (!market) return;
+    if (!isLoggedIn) {
+      setShowAuthModal(true);
+      trackEvent('login_wall_shown', { marketId: market.id });
       return;
     }
     setShowBetModal({ market, side });
-    trackEvent('bet_click', user?.id, { marketId: market.id, side });
+    trackEvent('bet_click', { marketId: market.id, side });
   };
 
   const onConfirmBet = async (amount: number) => {
@@ -128,32 +232,83 @@ export default function App() {
     const side = showBetModal.side;
     const market = showBetModal.market;
 
-    if (!isLoggedIn) {
-      setHasDoneFakeBet(true);
+    if (!isLoggedIn || !user?.id) {
+      setShowAuthModal(true);
+      return;
+    }
+
+    if (!isRealMode) {
+      // Demo mode logic
+      if (amount > demoBalance) {
+        showToast(t.insufficientDemoBalance, 'error');
+        return;
+      }
+      setDemoBalance(demoBalance - amount);
       setConfirmBet({ side, amount });
-      trackEvent('fake_bet', undefined, { marketId: market.id, amount, side });
-      setTimeout(() => setConfirmBet(null), 3000);
       setShowBetModal(null);
+      showToast(t.demoBetSuccess, 'success');
       return;
     }
 
     try {
-      const res = await fetch('/api/bets', {
+      const res = await apiFetch('/api/bets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: user?.id,
           marketId: market.id,
           amount,
           side
         })
       });
+      
+      if (!res.ok) {
+        let errorMsg = 'Failed to place bet';
+        try {
+          const clone = res.clone();
+          const errorData = await clone.json();
+          errorMsg = errorData.error || errorMsg;
+        } catch (e) {
+          const text = await res.text();
+          console.error("Server returned non-JSON error:", text);
+          errorMsg = `Server error: ${res.status}`;
+        }
+        
+        if (res.status === 401 || errorMsg.includes("User not found")) {
+          useAuthStore.getState().logout();
+          setShowAuthModal(true);
+        } else if (errorMsg.includes("Insufficient balance")) {
+          showToast(t.insufficientBalance, 'error');
+          setShowBetModal(null);
+          setShowTopUpModal(true);
+          return;
+        } else {
+          showToast(errorMsg, 'error');
+        }
+        throw new Error(errorMsg);
+      }
+
       const data = await res.json();
       if (data.bet) {
         setUser({ ...user!, balance: data.balance });
         setConfirmBet({ side, amount });
-        trackEvent('bet_success', user?.id, { marketId: market.id, amount, side });
+        trackEvent('bet_success', { marketId: market.id, amount, side });
         
+        // Trigger confetti for real bet
+        confetti({
+          particleCount: 150,
+          spread: 80,
+          origin: { y: 0.6 },
+          colors: ['#10b981', '#34d399', '#059669', '#ffffff']
+        });
+
+        // Update the market in the list
+        if (data.market) {
+          setMarkets(prev => prev.map(m => m.id === data.market.id ? { ...data.market, userLiked: m.userLiked, userSaved: m.userSaved } : m));
+          if (showDetail?.id === data.market.id) {
+            setShowDetail({ ...data.market, userLiked: showDetail.userLiked, userSaved: showDetail.userSaved });
+          }
+        }
+
         // Auto-like if not already liked
         if (!market.userLiked) {
           handleLike(market.id);
@@ -167,27 +322,43 @@ export default function App() {
     setShowBetModal(null);
   };
 
-  const handleLogin = async () => {
-    const handle = `user_${Math.floor(Math.random() * 10000)}`;
-    const res = await fetch('/api/auth/mock', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: `${handle}@example.com`, handle })
-    });
-    const data = await res.json();
-    setUser(data);
+  const handleLoginSuccess = (data: any) => {
+    const { token, isNewUser, ...userData } = data;
+    setToken(token || null);
+    setUser(userData);
+    setIsRealMode(true);
     setShowAuthModal(false);
-    trackEvent('login_success', data.id);
+    trackEvent('login_success', { userId: userData.id });
+    if (isNewUser) {
+      setShowWelcomeModal(true);
+    }
   };
 
+  const lastSwipeAt = useRef(0);
   const handleSwipe = (direction: 'up' | 'down') => {
-    if (direction === 'up' && currentIndex < markets.length - 1) {
-      setCurrentIndex(prev => prev + 1);
-      trackEvent('swipe_up', user?.id, { index: currentIndex + 1 });
-    } else if (direction === 'down' && currentIndex > 0) {
-      setCurrentIndex(prev => prev - 1);
-      trackEvent('swipe_down', user?.id, { index: currentIndex - 1 });
+    const now = Date.now();
+    if (now - lastSwipeAt.current < 350) return;
+    lastSwipeAt.current = now;
+
+    if (direction === 'up') {
+      if (currentIndex < markets.length - 1) {
+        setSwipeDirection('up');
+        setCurrentIndex(prev => prev + 1);
+        trackEvent('swipe_up', { index: currentIndex + 1 });
+      } else {
+        setSwipeDirection('up');
+      }
+    } else if (direction === 'down') {
+      if (currentIndex > 0) {
+        setSwipeDirection('down');
+        setCurrentIndex(prev => prev - 1);
+        trackEvent('swipe_down', { index: currentIndex - 1 });
+      } else {
+        setSwipeDirection('down');
+      }
     }
+
+    setTimeout(() => setSwipeDirection(null), 400);
   };
 
   const handleLike = async (marketId: string) => {
@@ -213,12 +384,21 @@ export default function App() {
     }));
 
     try {
-      const res = await fetch(`/api/markets/${marketId}/like`, {
+      const res = await apiFetch(`/api/markets/${marketId}/like`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user?.id })
+        body: JSON.stringify({})
       });
+      
       const data = await res.json();
+      if (!res.ok) {
+        const errorMsg = data.error || 'Failed to toggle like';
+        if (res.status === 401 || errorMsg.includes("User not found")) {
+          useAuthStore.getState().logout();
+          setShowAuthModal(true);
+        }
+        throw new Error(errorMsg);
+      }
       
       // Sync with server response if needed (optional but safer)
       setMarkets(prev => prev.map(m => {
@@ -268,12 +448,21 @@ export default function App() {
     }));
 
     try {
-      const res = await fetch(`/api/markets/${marketId}/save`, {
+      const res = await apiFetch(`/api/markets/${marketId}/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user?.id })
+        body: JSON.stringify({})
       });
+      
       const data = await res.json();
+      if (!res.ok) {
+        const errorMsg = data.error || 'Failed to toggle save';
+        if (res.status === 401 || errorMsg.includes("User not found")) {
+          useAuthStore.getState().logout();
+          setShowAuthModal(true);
+        }
+        throw new Error(errorMsg);
+      }
       setMarkets(prev => prev.map(m => {
         if (m.id === marketId) {
           return { ...m, userSaved: data.saved };
@@ -296,53 +485,103 @@ export default function App() {
   };
 
   const handleShare = async (market: Market) => {
+    if (isSharing.current) return;
+
     const shareData = {
       title: market.title,
-      text: `Check out this prediction market: ${market.title}`,
+      text: t.shareMarketText.replace('{title}', market.title),
       url: window.location.href,
     };
 
     try {
       if (navigator.share) {
+        isSharing.current = true;
         await navigator.share(shareData);
       } else {
         await navigator.clipboard.writeText(window.location.href);
-        alert(t.shareSuccess);
+        showToast(t.shareSuccess, 'success');
       }
     } catch (err) {
+      // Handle cancellation or concurrent share attempts gracefully
+      if (err instanceof Error) {
+        if (err.name === 'AbortError') {
+          // User canceled the share dialog - this is expected behavior
+          return;
+        }
+        if (err.message.includes('earlier share has not yet completed')) {
+          // This should be prevented by isSharing.current, but handle it just in case
+          return;
+        }
+      }
       console.error('Error sharing:', err);
+    } finally {
+      isSharing.current = false;
     }
   };
 
   const renderView = () => {
+    if (markets.length === 0 && currentView === 'feed') {
+      return (
+        <div key="loading-markets" className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+          <div className="w-16 h-16 bg-zinc-900 rounded-full flex items-center justify-center mb-4 animate-pulse">
+            <TrendingUp size={32} className="text-zinc-700" />
+          </div>
+          <h3 className="text-xl font-bold mb-2">{t.loadingMarketsTitle}</h3>
+          <p className="text-zinc-500 text-sm">{t.loadingMarketsSubtitle}</p>
+        </div>
+      );
+    }
+
+    const safeIndex = Math.min(Math.max(0, currentIndex), markets.length - 1);
+    const currentMarket = markets[safeIndex];
+
     switch (currentView) {
       case 'feed':
         return (
-          <AnimatePresence mode="wait">
-            {markets.length > 0 && (
-              <MarketCard 
-                key={markets[currentIndex].id}
-                market={markets[currentIndex]}
-                onBet={handleBetClick}
-                onDetail={() => setShowDetail(markets[currentIndex])}
-                onSwipe={handleSwipe}
-                onLike={() => handleLike(markets[currentIndex].id)}
-                onSave={() => handleSave(markets[currentIndex].id)}
-                onShare={() => handleShare(markets[currentIndex])}
-              />
-            )}
+          <AnimatePresence initial={false} custom={swipeDirection}>
+          {currentMarket ? (
+            <MarketCard 
+              key={`market-${currentMarket.id}-${safeIndex}`}
+              market={currentMarket}
+              direction={swipeDirection}
+              onDetail={() => setShowDetail(currentMarket)}
+              onSwipe={handleSwipe}
+              onLike={() => handleLike(currentMarket.id)}
+              onSave={() => handleSave(currentMarket.id)}
+              onShare={() => handleShare(currentMarket)}
+              isFirst={safeIndex === 0}
+              isLast={safeIndex === markets.length - 1}
+            />
+          ) : (
+            <div key="no-market" className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-black">
+              <TrendingUp size={48} className="text-zinc-800 mb-4" />
+              <h3 className="text-xl font-bold mb-2">{t.endOfFeedTitle}</h3>
+              <p className="text-zinc-500 text-sm">{t.endOfFeedSubtitle}</p>
+              <Button variant="primary" className="mt-6" onClick={() => setCurrentIndex(0)}>{t.backToTop}</Button>
+            </div>
+          )}
           </AnimatePresence>
         );
       case 'rank':
         return <RankingView />;
       case 'create':
-        return <CreateView onClose={() => setCurrentView('feed')} />;
+        return <CreateView onClose={() => setCurrentView('feed')} showToast={showToast} />;
       case 'history':
         return <HistoryView userId={user?.id} />;
       case 'profile':
-        return <ProfileView user={user} onLogout={() => { useAuthStore.getState().logout(); setCurrentView('feed'); }} onSavedClick={() => setCurrentView('saved')} />;
+        return (
+          <ProfileView 
+            user={user} 
+            onLogout={() => { useAuthStore.getState().logout(); setCurrentView('feed'); }} 
+            onSavedClick={() => setCurrentView('saved')} 
+            onAdminClick={() => setCurrentView('admin')}
+            onTopUp={() => setShowTopUpModal(true)}
+          />
+        );
       case 'saved':
         return <SavedView userId={user?.id} onBack={() => setCurrentView('profile')} onMarketClick={(m) => setShowDetail(m)} />;
+      case 'admin':
+        return <AdminView onBack={() => setCurrentView('profile')} onRefreshMarkets={() => fetchMarkets(selectedCategory?.search, false, fetchVersion.current)} showToast={showToast} />;
       default:
         return null;
     }
@@ -351,50 +590,182 @@ export default function App() {
   return (
     <div className="h-screen w-full bg-black text-white overflow-hidden flex flex-col font-sans selection:bg-emerald-500/30">
       {/* Header */}
-      <header className="fixed top-0 left-0 right-0 z-50 p-4 flex items-center justify-between bg-gradient-to-b from-black/80 to-transparent backdrop-blur-sm">
-        <div className="flex items-center gap-2" onClick={() => setCurrentView('feed')}>
-          <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center font-bold text-black italic">P</div>
-          <span className="font-bold text-xl tracking-tight hidden sm:block">PREDICT</span>
-        </div>
-        
-        <div className="flex items-center gap-3">
-          <div className="flex bg-zinc-900/80 rounded-full p-1 border border-white/5">
-            <button 
-              onClick={() => setIsRealMode(false)}
-              className={cn("px-3 py-1 rounded-full text-xs font-medium transition-all", !isRealMode ? "bg-emerald-500 text-black" : "text-zinc-400")}
-            >
-              {t.demo}
-            </button>
-            <button 
-              onClick={() => {
-                setIsRealMode(true);
-                setShowWaitlist(true);
-                trackEvent('switch_to_real_click', user?.id);
-              }}
-              className={cn("px-3 py-1 rounded-full text-xs font-medium transition-all", isRealMode ? "bg-emerald-500 text-black" : "text-zinc-400")}
-            >
-              {t.live}
-            </button>
-          </div>
-          
-          {isLoggedIn ? (
-            <div className="flex items-center gap-2 bg-zinc-900/80 px-3 py-1.5 rounded-full border border-white/5">
-              <Wallet size={14} className="text-emerald-500" />
-              <span className="text-sm font-bold">{formatPrice(user!.balance, language)}</span>
+      <header className="fixed top-0 left-0 right-0 z-[60] p-4 flex items-center justify-between bg-black/20 lg:bg-gradient-to-b lg:from-black/90 lg:to-transparent backdrop-blur-md">
+        <div className="flex items-center gap-6 lg:gap-12 w-full max-w-[1400px] mx-auto">
+          <div className="flex items-center gap-2 cursor-pointer shrink-0" onClick={() => { setCurrentView('feed'); setSelectedCategory(null); }}>
+            <div className="flex flex-col leading-none">
+              <span className="font-black text-xl lg:text-2xl tracking-tighter text-emerald-500 italic">Predi</span>
+              <span className="font-bold text-[10px] lg:text-[12px] tracking-[0.2em] text-zinc-500 uppercase ml-0.5">Club</span>
             </div>
-          ) : (
-            <Button variant="primary" className="py-1.5 text-xs rounded-full" onClick={() => setShowAuthModal(true)}>{t.login}</Button>
-          )}
+          </div>
+
+          <div className="flex-1 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              {/* Category Selector */}
+              <div className="relative">
+                <button 
+                  onClick={() => setShowCategoryDropdown(!showCategoryDropdown)}
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-1.5 rounded-full transition-all text-sm font-medium",
+                    selectedCategory 
+                      ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20" 
+                      : "bg-zinc-900/80 text-zinc-300 hover:bg-zinc-800 border border-white/5"
+                  )}
+                >
+                  {selectedCategory ? selectedCategory.icon : <Search size={16} />}
+                  <span>{selectedCategory ? (selectedCategory.name.length > 8 ? selectedCategory.name.slice(0, 8) + '..' : selectedCategory.name) : t.categoriesLabel}</span>
+                  {selectedCategory && (
+                    <X 
+                      size={14} 
+                      className="ml-1 hover:scale-110 transition-transform" 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedCategory(null);
+                      }}
+                    />
+                  )}
+                </button>
+
+                <AnimatePresence>
+                  {showCategoryDropdown && [
+                    <motion.div 
+                      key="category-overlay"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-sm lg:hidden"
+                      onClick={() => setShowCategoryDropdown(false)}
+                    />,
+                    <motion.div 
+                      key="category-dropdown"
+                      initial={{ opacity: 0, y: -20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -20 }}
+                      className="absolute top-full left-0 mt-2 w-[280px] lg:w-[320px] bg-zinc-900/95 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl z-[80] overflow-hidden"
+                    >
+                      <div className="p-2 grid grid-cols-1 gap-1 max-h-[70vh] overflow-y-auto no-scrollbar">
+                        {getCategories(t).map((cat) => (
+                          <button
+                            key={cat.id}
+                            onClick={() => {
+                              setSelectedCategory(cat);
+                              setShowCategoryDropdown(false);
+                            }}
+                            className={cn(
+                              "flex items-center gap-3 p-3 rounded-xl transition-all text-left group",
+                              selectedCategory?.id === cat.id 
+                                ? "bg-emerald-500 text-white" 
+                                : "hover:bg-white/5 text-zinc-300 hover:text-white"
+                            )}
+                          >
+                            <div className={cn(
+                              "p-2 rounded-lg transition-colors",
+                              selectedCategory?.id === cat.id ? "bg-white/20" : "bg-zinc-800 group-hover:bg-zinc-700"
+                            )}>
+                              {cat.icon}
+                            </div>
+                            <span className="font-medium">{cat.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </motion.div>
+                  ]}
+                </AnimatePresence>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-3">
+              {isLoggedIn ? (
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => setShowTopUpModal(true)}
+                    className="flex items-center gap-2 bg-zinc-900/80 px-3 py-1.5 rounded-full border border-white/5 whitespace-nowrap hover:bg-zinc-800 transition-colors"
+                  >
+                    <Wallet size={14} className="text-emerald-500" />
+                    <span className="text-sm font-bold">{formatPrice(isRealMode ? user!.balance : demoBalance, language)}</span>
+                  </button>
+                  {((isRealMode ? user!.balance : demoBalance) < 100) && (
+                    <button 
+                      onClick={handleRefill}
+                      className="bg-emerald-500/10 text-emerald-500 p-1.5 rounded-full hover:bg-emerald-500/20 transition-all"
+                      title={isRealMode ? t.refillBalanceTitle : t.refillDemoTitle}
+                    >
+                      <Plus size={14} />
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <Button variant="primary" className="py-1.5 text-xs rounded-full" onClick={() => setShowAuthModal(true)}>{t.login}</Button>
+              )}
+
+              {/* Desktop Add Event Button */}
+              {isLoggedIn && (
+                <button 
+                  onClick={() => setCurrentView('create')}
+                  className="hidden lg:flex items-center gap-2 bg-white text-black px-4 py-1.5 rounded-full font-bold text-sm hover:bg-zinc-200 transition-colors shadow-lg shadow-white/10"
+                >
+                  <Plus size={18} />
+                  <span>{t.createEvent}</span>
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main className="flex-1 relative overflow-hidden">
-        {renderView()}
-      </main>
+      <div className="flex-1 flex w-full max-w-[1400px] mx-auto relative overflow-hidden pt-16">
+        {/* Desktop Sidebar Nav */}
+        <aside className="hidden lg:flex flex-col gap-6 w-64 p-6 border-r border-white/5 bg-black/40">
+          <div className="space-y-2">
+            <SidebarNavButton 
+              active={currentView === 'feed'} 
+              icon={<TrendingUp size={22} />} 
+              label={t.feed} 
+              onClick={() => setCurrentView('feed')} 
+            />
+            <SidebarNavButton 
+              active={currentView === 'rank'} 
+              icon={<Trophy size={22} />} 
+              label={t.rank} 
+              onClick={() => setCurrentView('rank')} 
+            />
+            <SidebarNavButton 
+              active={currentView === 'history'} 
+              icon={<History size={22} />} 
+              label={t.bets} 
+              onClick={() => {
+                if (!isLoggedIn) setShowAuthModal(true);
+                else setCurrentView('history');
+              }} 
+            />
+            <SidebarNavButton 
+              active={currentView === 'profile'} 
+              icon={<UserIcon size={22} />} 
+              label={t.me} 
+              onClick={() => {
+                if (!isLoggedIn) setShowAuthModal(true);
+                else setCurrentView('profile');
+              }} 
+            />
+          </div>
 
-      {/* Bottom Nav */}
-      <nav className="fixed bottom-0 left-0 right-0 z-50 bg-black/80 backdrop-blur-xl border-t border-white/5 px-6 py-3 flex justify-between items-center">
+          <div className="mt-auto p-4 rounded-2xl bg-zinc-900/50 border border-white/5">
+            <p className="text-xs text-zinc-500 leading-relaxed">
+              {t.sidebarTagline}
+            </p>
+          </div>
+        </aside>
+
+        {/* Main Content Area */}
+        <main className="flex-1 relative overflow-hidden flex justify-center items-center p-4 lg:p-8">
+          <div className="w-full max-w-[500px] h-full lg:h-auto lg:aspect-[9/16] lg:max-h-[calc(100vh-120px)] relative bg-zinc-950 shadow-2xl shadow-black rounded-3xl overflow-hidden">
+            {renderView()}
+          </div>
+        </main>
+      </div>
+
+      {/* Bottom Nav (Mobile Only) */}
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-black/80 backdrop-blur-xl border-t border-white/5 px-6 py-3 flex justify-between items-center">
         <NavButton 
           active={currentView === 'feed'} 
           icon={<TrendingUp size={24} />} 
@@ -408,7 +779,10 @@ export default function App() {
           onClick={() => setCurrentView('rank')} 
         />
         <button 
-          onClick={() => setCurrentView('create')}
+          onClick={() => {
+            if (!isLoggedIn) setShowAuthModal(true);
+            else setCurrentView('create');
+          }}
           className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-black -mt-8 shadow-xl shadow-white/10 active:scale-90 transition-transform"
         >
           <Plus size={28} />
@@ -436,855 +810,130 @@ export default function App() {
       {/* Modals */}
       <AnimatePresence>
         {showBetModal && (
-          <BetModal 
-            market={showBetModal.market} 
-            side={showBetModal.side} 
-            userBalance={user?.balance || 1000}
-            onClose={() => setShowBetModal(null)}
-            onConfirm={onConfirmBet}
-          />
+          <div key="bet-modal-container" className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setShowBetModal(null)}
+            />
+            <BetModal 
+              key="bet-modal"
+              market={showBetModal.market} 
+              side={showBetModal.side} 
+              userBalance={isRealMode ? (user?.balance || 0) : demoBalance}
+              onClose={() => setShowBetModal(null)}
+              onConfirm={onConfirmBet}
+              onRefill={handleRefill}
+            />
+          </div>
         )}
         {showAuthModal && (
-          <AuthModal onClose={() => setShowAuthModal(false)} onLogin={handleLogin} />
+          <div key="auth-modal-container" className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setShowAuthModal(false)}
+            />
+            <AuthModal key="auth-modal" onClose={() => setShowAuthModal(false)} onLoginSuccess={handleLoginSuccess} />
+          </div>
         )}
         {showDetail && (
-          <MarketDetail 
-            market={showDetail} 
-            onClose={() => setShowDetail(null)} 
-            onSave={() => handleSave(showDetail.id)}
-            onShare={() => handleShare(showDetail)}
-          />
+          <div key="detail-modal-container" className="fixed inset-0 z-[100] flex items-center justify-center p-4 lg:p-0 lg:justify-end">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => setShowDetail(null)}
+            />
+            <MarketDetail 
+              key={`detail-${showDetail.id}`}
+              market={showDetail} 
+              onClose={() => setShowDetail(null)} 
+              onBet={handleBetClick}
+              onSave={() => handleSave(showDetail.id)}
+              onShare={() => handleShare(showDetail)}
+              showToast={showToast}
+            />
+          </div>
         )}
         {showWaitlist && (
-          <WaitlistModal onClose={() => { setShowWaitlist(false); setIsRealMode(false); }} />
+          <div key="waitlist-modal-container" className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+              onClick={() => { setShowWaitlist(false); setIsRealMode(false); }}
+            />
+            <WaitlistModal key="waitlist-modal" onClose={() => { setShowWaitlist(false); setIsRealMode(false); }} />
+          </div>
+        )}
+        {showWelcomeModal && (
+          <div key="welcome-modal-container" className="fixed inset-0 z-[300] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/80 backdrop-blur-md"
+              onClick={() => setShowWelcomeModal(false)}
+            />
+            <WelcomeModal 
+              onClose={() => setShowWelcomeModal(false)} 
+              onTopUp={() => {
+                setShowWelcomeModal(false);
+                setShowTopUpModal(true);
+              }} 
+            />
+          </div>
+        )}
+        {showTopUpModal && (
+          <div key="topup-modal-container" className="fixed inset-0 z-[300] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-black/80 backdrop-blur-md"
+              onClick={() => setShowTopUpModal(false)}
+            />
+            <WalletModal 
+              onClose={() => setShowTopUpModal(false)} 
+              showToast={showToast}
+              onSuccess={async (amount) => {
+                setShowTopUpModal(false);
+                setShowDepositSuccess({ amount });
+                if (user?.id) {
+                  try {
+                    const res = await apiFetch(`/api/users/${user.id}`);
+                    if (res.ok) {
+                      const updatedUser = await res.json();
+                      setUser(updatedUser);
+                    }
+                  } catch {}
+                }
+              }}
+            />
+          </div>
         )}
         {confirmBet && (
-          <BetConfirmation side={confirmBet.side} amount={confirmBet.amount} />
+          <BetConfirmation key="bet-confirm" side={confirmBet.side} amount={confirmBet.amount} />
+        )}
+        {showDepositSuccess && (
+          <DepositSuccessModal key="deposit-success" amount={showDepositSuccess.amount} />
+        )}
+        {toast && (
+          <Toast 
+            key="toast"
+            message={toast.message} 
+            type={toast.type} 
+            onClose={() => setToast(null)} 
+          />
         )}
       </AnimatePresence>
     </div>
-  );
-}
-
-function NavButton({ active, icon, label, onClick }: { active: boolean; icon: React.ReactNode; label: string; onClick: () => void }) {
-  return (
-    <button 
-      onClick={onClick}
-      className={cn(
-        "flex flex-col items-center gap-1 transition-colors",
-        active ? "text-emerald-500" : "text-zinc-500 hover:text-zinc-300"
-      )}
-    >
-      {icon}
-      <span className="text-[10px] font-medium uppercase tracking-widest">{label}</span>
-    </button>
-  );
-}
-
-// --- Views ---
-
-function RankingView() {
-  const { language } = useAuthStore();
-  const t = translations[language];
-  const [rankings, setRankings] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch('/api/users/rankings')
-      .then(res => res.json())
-      .then(data => {
-        setRankings(data);
-        setLoading(false);
-      });
-  }, []);
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="h-full w-full pt-20 pb-24 overflow-y-auto px-6"
-    >
-      <h2 className="text-3xl font-black mb-6 tracking-tighter">{t.leaderboard}</h2>
-      
-      {loading ? (
-        <div className="flex justify-center py-12"><div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" /></div>
-      ) : (
-        <div className="space-y-3">
-          {rankings.map((u, i) => (
-            <GlassCard key={u.id} className="flex items-center gap-4 py-3">
-              <span className={cn(
-                "w-6 text-center font-black italic text-lg",
-                i === 0 ? "text-yellow-400" : i === 1 ? "text-zinc-400" : i === 2 ? "text-amber-600" : "text-zinc-600"
-              )}>
-                {i + 1}
-              </span>
-              <img src={u.avatar} className="w-10 h-10 rounded-xl bg-zinc-800" />
-              <div className="flex-1">
-                <div className="font-bold">@{u.handle}</div>
-                <div className="text-[10px] text-zinc-500 uppercase tracking-widest">{u._count.bets} {t.bets}</div>
-              </div>
-              <div className="text-right">
-                <div className="font-black text-emerald-400">{formatPrice(u.balance, language)}</div>
-                <div className="text-[10px] text-zinc-600 uppercase tracking-widest">{t.credits}</div>
-              </div>
-            </GlassCard>
-          ))}
-        </div>
-      )}
-    </motion.div>
-  );
-}
-
-function HistoryView({ userId }: { userId?: string }) {
-  const { language } = useAuthStore();
-  const t = translations[language];
-  const [bets, setBets] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (userId) {
-      fetch(`/api/users/${userId}/bets`)
-        .then(res => res.json())
-        .then(data => {
-          setBets(data);
-          setLoading(false);
-        });
-    }
-  }, [userId]);
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="h-full w-full pt-20 pb-24 overflow-y-auto px-6"
-    >
-      <h2 className="text-3xl font-black mb-6 tracking-tighter">{t.myBets}</h2>
-      
-      {loading ? (
-        <div className="flex justify-center py-12"><div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" /></div>
-      ) : bets.length === 0 ? (
-        <div className="text-center py-12 text-zinc-500">{t.noBets}</div>
-      ) : (
-        <div className="space-y-4">
-          {bets.map(b => (
-            <GlassCard key={b.id} className="flex flex-col gap-3">
-              <div className="flex justify-between items-start">
-                <span className={cn(
-                  "px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest",
-                  b.side === 'YES' ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400"
-                )}>
-                  {b.side}
-                </span>
-                <span className="text-[10px] text-zinc-600">{new Date(b.createdAt).toLocaleDateString()}</span>
-              </div>
-              <h4 className="font-bold text-sm leading-tight">{b.market.title}</h4>
-              <div className="flex justify-between items-center pt-2 border-t border-white/5">
-                <span className="text-xs text-zinc-500">{t.amount}</span>
-                <span className="font-bold">{formatPrice(b.amount, language)}</span>
-              </div>
-            </GlassCard>
-          ))}
-        </div>
-      )}
-    </motion.div>
-  );
-}
-
-function ProfileView({ user, onLogout, onSavedClick }: { user: any; onLogout: () => void; onSavedClick: () => void }) {
-  const { language, setLanguage } = useAuthStore();
-  const t = translations[language];
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="h-full w-full pt-20 pb-24 overflow-y-auto px-6"
-    >
-      <div className="flex flex-col items-center mb-8">
-        <div className="relative mb-4">
-          <img src={user.avatar} className="w-24 h-24 rounded-[2rem] bg-zinc-800 border-2 border-emerald-500/20" />
-          <div className="absolute -bottom-2 -right-2 bg-emerald-500 text-black p-1.5 rounded-xl shadow-lg">
-            <CheckCircle2 size={16} />
-          </div>
-        </div>
-        <h2 className="text-2xl font-black tracking-tight">@{user.handle}</h2>
-        <p className="text-zinc-500 text-sm">Pro Predictor</p>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4 mb-8">
-        <GlassCard className="flex flex-col items-center py-6">
-          <span className="text-3xl font-black text-emerald-400">{formatPrice(user.balance, language)}</span>
-          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mt-1">{t.credits}</span>
-        </GlassCard>
-        <GlassCard className="flex flex-col items-center py-6">
-          <span className="text-3xl font-black">74%</span>
-          <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest mt-1">{t.winRate}</span>
-        </GlassCard>
-      </div>
-
-      <div className="space-y-3">
-        <div className="bg-zinc-900/40 border border-white/5 p-4 rounded-2xl flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-400"><Info size={20} /></div>
-            <span className="font-bold">{t.language}</span>
-          </div>
-          <div className="flex bg-zinc-800 rounded-lg p-1">
-            <button 
-              onClick={() => setLanguage('en')}
-              className={cn("px-3 py-1 rounded-md text-xs font-bold transition-all", language === 'en' ? "bg-emerald-500 text-black" : "text-zinc-500")}
-            >
-              EN
-            </button>
-            <button 
-              onClick={() => setLanguage('ru')}
-              className={cn("px-3 py-1 rounded-md text-xs font-bold transition-all", language === 'ru' ? "bg-emerald-500 text-black" : "text-zinc-500")}
-            >
-              RU
-            </button>
-          </div>
-        </div>
-        <button className="w-full bg-zinc-900/40 border border-white/5 p-4 rounded-2xl flex items-center justify-between hover:bg-zinc-800/50 transition-colors">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-400"><TrendingUp size={20} /></div>
-            <span className="font-bold">{t.statistics}</span>
-          </div>
-          <ArrowUpRight size={20} className="text-zinc-600" />
-        </button>
-        <button 
-          onClick={onSavedClick}
-          className="w-full bg-zinc-900/40 border border-white/5 p-4 rounded-2xl flex items-center justify-between hover:bg-zinc-800/50 transition-colors"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-zinc-800 rounded-xl flex items-center justify-center text-zinc-400"><Heart size={20} /></div>
-            <span className="font-bold">{t.saved}</span>
-          </div>
-          <ArrowUpRight size={20} className="text-zinc-600" />
-        </button>
-        <button 
-          onClick={onLogout}
-          className="w-full bg-rose-500/10 border border-rose-500/20 p-4 rounded-2xl flex items-center justify-center gap-3 text-rose-500 font-bold mt-8"
-        >
-          {t.logout}
-        </button>
-      </div>
-    </motion.div>
-  );
-}
-
-function SavedView({ userId, onBack, onMarketClick }: { userId: string | undefined; onBack: () => void; onMarketClick: (m: Market) => void }) {
-  const { language } = useAuthStore();
-  const t = translations[language];
-  const [markets, setMarkets] = useState<Market[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (userId) {
-      fetch(`/api/users/${userId}/saves`)
-        .then(res => res.json())
-        .then(data => {
-          setMarkets(data);
-          setLoading(false);
-        });
-    }
-  }, [userId]);
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="h-full w-full pt-20 pb-24 overflow-y-auto px-6"
-    >
-      <div className="flex items-center gap-4 mb-6">
-        <button onClick={onBack} className="p-2 hover:bg-zinc-900 rounded-full"><ArrowLeft size={24} /></button>
-        <h2 className="text-3xl font-black tracking-tighter">{t.saved}</h2>
-      </div>
-      
-      {loading ? (
-        <div className="flex justify-center py-12"><div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" /></div>
-      ) : markets.length === 0 ? (
-        <div className="text-center py-12 text-zinc-500">No saved markets yet</div>
-      ) : (
-        <div className="space-y-4">
-          {markets.map(m => (
-            <GlassCard key={m.id} className="flex gap-4 items-center" onClick={() => onMarketClick(m)}>
-              <img src={m.imageUrl} className="w-16 h-16 rounded-xl object-cover" referrerPolicy="no-referrer" />
-              <div className="flex-1">
-                <h4 className="font-bold text-sm leading-tight mb-1">{m.title}</h4>
-                <div className="flex items-center gap-3">
-                  <span className="text-[10px] text-zinc-500 uppercase font-bold">{m.category}</span>
-                  <div className="flex items-center gap-1 text-[10px] text-zinc-500 font-bold">
-                    <Heart size={10} className="text-rose-500" fill="currentColor" /> {m._count.likes}
-                  </div>
-                </div>
-              </div>
-              <ArrowUpRight size={20} className="text-zinc-600" />
-            </GlassCard>
-          ))}
-        </div>
-      )}
-    </motion.div>
-  );
-}
-
-function CreateView({ onClose }: { onClose: () => void }) {
-  const { language } = useAuthStore();
-  const t = translations[language];
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="h-full w-full pt-20 pb-24 overflow-y-auto px-6"
-    >
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-3xl font-black tracking-tighter">{t.propose}</h2>
-        <button onClick={onClose} className="p-2 hover:bg-zinc-900 rounded-full"><X size={24} /></button>
-      </div>
-
-      <GlassCard className="p-6 space-y-6">
-        <div className="space-y-2">
-          <label className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">{t.question}</label>
-          <textarea 
-            placeholder="Will Bitcoin hit $100k?" 
-            className="w-full bg-zinc-800/50 border border-white/5 rounded-xl p-4 text-sm focus:outline-none focus:border-emerald-500 h-24 resize-none"
-          />
-        </div>
-        <div className="space-y-2">
-          <label className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">{t.category}</label>
-          <select className="w-full bg-zinc-800/50 border border-white/5 rounded-xl p-4 text-sm focus:outline-none focus:border-emerald-500 appearance-none">
-            <option>Crypto</option>
-            <option>Sports</option>
-            <option>Politics</option>
-            <option>Tech</option>
-          </select>
-        </div>
-        <div className="pt-4">
-          <Button className="w-full py-4 rounded-2xl font-bold" onClick={onClose}>{t.submit}</Button>
-          <p className="text-center text-[10px] text-zinc-600 mt-4 uppercase tracking-widest">{t.reviewNote}</p>
-        </div>
-      </GlassCard>
-    </motion.div>
-  );
-}
-
-
-// --- Sub-components ---
-
-function MarketCard({ market, onBet, onDetail, onSwipe, onLike, onSave, onShare }: { 
-  market: Market; 
-  onBet: (m: Market, s: 'YES' | 'NO') => void;
-  onDetail: () => void;
-  onSwipe: (d: 'up' | 'down') => void;
-  onLike: () => void;
-  onSave: () => void;
-  onShare: () => void;
-}) {
-  const touchStart = useRef(0);
-  const { user, isLoggedIn, language } = useAuthStore();
-  const t = translations[language];
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -20 }}
-      className="absolute inset-0 w-full h-full"
-      onWheel={e => {
-        if (Math.abs(e.deltaY) > 50) {
-          onSwipe(e.deltaY > 0 ? 'up' : 'down');
-        }
-      }}
-      onTouchStart={e => touchStart.current = e.touches[0].clientY}
-      onTouchEnd={e => {
-        const delta = touchStart.current - e.changedTouches[0].clientY;
-        if (Math.abs(delta) > 50) {
-          onSwipe(delta > 0 ? 'up' : 'down');
-        }
-      }}
-    >
-      {/* Background Image */}
-      <div className="absolute inset-0">
-        <img src={market.imageUrl} className="w-full h-full object-cover opacity-60" referrerPolicy="no-referrer" />
-        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-black/60" />
-      </div>
-
-      {/* Content */}
-      <div className="relative h-full flex flex-col justify-end p-6 pr-20 pb-28 sm:pr-6">
-        <div className="flex flex-col gap-4 max-w-lg">
-          <div className="flex gap-2">
-            <span className="bg-emerald-500/20 text-emerald-400 text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wider border border-emerald-500/30">
-              {market.category}
-            </span>
-            <span className="bg-zinc-800/80 text-zinc-300 text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wider border border-white/5 flex items-center gap-1">
-              <TrendingUp size={10} />
-              Trending
-            </span>
-          </div>
-
-          <h1 className="text-3xl font-bold leading-tight tracking-tight" onClick={onDetail}>
-            {market.title}
-          </h1>
-
-          <div className="grid grid-cols-2 gap-4 mt-4">
-            <GlassCard className="flex flex-col gap-1">
-              <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">{t.totalPool}</span>
-              <span className="text-lg font-bold">{formatPrice(market.totalPool, language)}</span>
-            </GlassCard>
-            <GlassCard className="flex flex-col gap-1">
-              <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">{t.bettors}</span>
-              <span className="text-lg font-bold">{market.bettorsCount}</span>
-            </GlassCard>
-          </div>
-
-          <div className="flex gap-3 mt-6">
-            <button 
-              onClick={() => onBet(market, 'YES')}
-              className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-black font-black py-4 rounded-2xl flex flex-col items-center transition-all active:scale-95"
-            >
-              <span className="text-sm uppercase tracking-tighter">{t.predict}</span>
-              <span className="text-2xl">YES {market.yesPercent.toFixed(0)}%</span>
-            </button>
-            <button 
-              onClick={() => onBet(market, 'NO')}
-              className="flex-1 bg-rose-500 hover:bg-rose-400 text-white font-black py-4 rounded-2xl flex flex-col items-center transition-all active:scale-95"
-            >
-              <span className="text-sm uppercase tracking-tighter">{t.predict}</span>
-              <span className="text-2xl">NO {market.noPercent.toFixed(0)}%</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Action Rail */}
-      <div className="absolute right-4 bottom-32 flex flex-col gap-6 items-center">
-        <div className="flex flex-col items-center gap-1">
-          <button 
-            onClick={(e) => { e.stopPropagation(); onLike(); }}
-            className={cn(
-              "w-12 h-12 rounded-full backdrop-blur-md border border-white/10 flex items-center justify-center active:scale-90 transition-all",
-              market.userLiked ? "bg-rose-500 text-white border-rose-500" : "bg-zinc-900/60 text-white"
-            )}
-          >
-            <Heart size={24} fill={market.userLiked ? "currentColor" : "none"} />
-          </button>
-          <span className="text-xs font-bold">{market._count.likes}</span>
-        </div>
-        <div className="flex flex-col items-center gap-1">
-          <button onClick={onDetail} className="w-12 h-12 rounded-full bg-zinc-900/60 backdrop-blur-md border border-white/10 flex items-center justify-center text-white active:scale-90 transition-transform">
-            <MessageCircle size={24} />
-          </button>
-          <span className="text-xs font-bold">{market._count.comments}</span>
-        </div>
-        <button 
-          onClick={(e) => { e.stopPropagation(); onSave(); }}
-          className={cn(
-            "w-12 h-12 rounded-full backdrop-blur-md border border-white/10 flex items-center justify-center active:scale-90 transition-all",
-            market.userSaved ? "bg-emerald-500 text-black border-emerald-500" : "bg-zinc-900/60 text-white"
-          )}
-        >
-          <Bookmark size={24} fill={market.userSaved ? "currentColor" : "none"} />
-        </button>
-        <button 
-          onClick={(e) => { e.stopPropagation(); onShare(); }}
-          className="w-12 h-12 rounded-full bg-zinc-900/60 backdrop-blur-md border border-white/10 flex items-center justify-center text-white active:scale-90 transition-transform"
-        >
-          <Share2 size={24} />
-        </button>
-      </div>
-    </motion.div>
-  );
-}
-
-function BetModal({ market, side, userBalance, onClose, onConfirm }: { 
-  market: Market; 
-  side: 'YES' | 'NO'; 
-  userBalance: number;
-  onClose: () => void;
-  onConfirm: (amount: number) => void;
-}) {
-  const { language } = useAuthStore();
-  const t = translations[language];
-  const [amount, setAmount] = useState<number>(100);
-  const chips = [50, 100, 250, 500, 1000];
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-4"
-      onClick={onClose}
-    >
-      <motion.div 
-        initial={{ y: 100 }}
-        animate={{ y: 0 }}
-        exit={{ y: 100 }}
-        className="bg-zinc-900 w-full max-w-md rounded-3xl p-6 border border-white/10"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl font-bold">{t.predict}</h2>
-          <button onClick={onClose} className="p-2 hover:bg-zinc-800 rounded-full"><X size={20} /></button>
-        </div>
-
-        <div className="mb-6">
-          <p className="text-zinc-400 text-sm mb-2">{t.predict} <span className={cn("font-bold", side === 'YES' ? "text-emerald-500" : "text-rose-500")}>{side}</span> on:</p>
-          <h3 className="font-bold leading-tight">{market.title}</h3>
-        </div>
-
-        <div className="mb-8">
-          <div className="flex justify-between items-end mb-4">
-            <span className="text-zinc-500 text-xs font-bold uppercase tracking-widest">{t.amount}</span>
-            <div className="flex flex-col items-end">
-              <div className="flex items-center gap-2 mb-1">
-                <button 
-                  onClick={() => setAmount(userBalance)}
-                  className="text-[10px] font-bold bg-zinc-800 text-zinc-400 px-2 py-1 rounded-md hover:bg-zinc-700 transition-colors"
-                >
-                  MAX
-                </button>
-                <input 
-                  type="number" 
-                  value={amount} 
-                  onChange={(e) => setAmount(Math.max(0, Number(e.target.value)))}
-                  className="bg-transparent text-right text-2xl font-bold focus:outline-none w-24 border-b border-white/10"
-                />
-              </div>
-              <span className="text-zinc-500 text-xs">Balance: {formatPrice(userBalance, language, true)}</span>
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2 mb-6">
-            {chips.map(c => (
-              <button 
-                key={c}
-                onClick={() => setAmount(c)}
-                className={cn(
-                  "px-4 py-2 rounded-xl text-sm font-bold border transition-all",
-                  amount === c ? "bg-emerald-500 border-emerald-500 text-black" : "bg-zinc-800 border-white/5 text-zinc-400"
-                )}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
-
-          <div className="bg-zinc-800/50 rounded-2xl p-4 border border-white/5">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-zinc-400 text-sm">Potential Payout</span>
-              <span className="font-bold text-emerald-500">
-                {formatPrice(amount / (Math.max(1, side === 'YES' ? market.yesPercent : market.noPercent) / 100), language, true)}
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-zinc-400 text-sm">Potential Profit</span>
-              <span className="font-bold text-emerald-400">
-                +{formatPrice((amount / (Math.max(1, side === 'YES' ? market.yesPercent : market.noPercent) / 100)) - amount, language, true)}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <Button 
-          variant={side === 'YES' ? 'primary' : 'danger'} 
-          className="w-full py-4 rounded-2xl text-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
-          onClick={() => onConfirm(amount)}
-          disabled={amount <= 0 || amount > userBalance}
-        >
-          {amount > userBalance ? 'Insufficient Balance' : `${t.predict} ${side}`}
-        </Button>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-function AuthModal({ onClose, onLogin }: { onClose: () => void; onLogin: () => void }) {
-  const { language } = useAuthStore();
-  const t = translations[language];
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[110] bg-black/90 backdrop-blur-md flex items-center justify-center p-6"
-    >
-      <div className="bg-zinc-900 w-full max-sm rounded-[2.5rem] p-8 border border-white/10 text-center">
-        <div className="w-20 h-20 bg-emerald-500/20 rounded-3xl flex items-center justify-center mx-auto mb-6 text-emerald-500">
-          <TrendingUp size={40} />
-        </div>
-        <h2 className="text-2xl font-bold mb-3">{t.joinMarket}</h2>
-        <p className="text-zinc-400 text-sm mb-8 leading-relaxed">
-          {t.authNote}
-        </p>
-        <div className="flex flex-col gap-3">
-          <Button className="w-full py-4 rounded-2xl font-bold flex items-center justify-center gap-3" onClick={onLogin}>
-            <img src="https://www.google.com/favicon.ico" className="w-5 h-5" />
-            {t.continueGoogle}
-          </Button>
-          <Button variant="secondary" className="w-full py-4 rounded-2xl font-bold" onClick={onLogin}>
-            {t.magicLink}
-          </Button>
-          <button onClick={onClose} className="text-zinc-500 text-sm font-medium mt-4 hover:text-zinc-300">{t.maybeLater}</button>
-        </div>
-      </div>
-    </motion.div>
-  );
-}
-
-function MarketDetail({ market: initialMarket, onClose, onSave, onShare }: { market: Market; onClose: () => void; onSave: () => void; onShare: () => void }) {
-  const { user, isLoggedIn, language } = useAuthStore();
-  const t = translations[language];
-  const [market, setMarket] = useState<any>(null);
-  const [commentText, setCommentText] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  useEffect(() => {
-    const fetchDetail = async () => {
-      const url = user?.id ? `/api/markets/${initialMarket.id}?userId=${user.id}` : `/api/markets/${initialMarket.id}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      setMarket(data);
-    };
-    fetchDetail();
-  }, [initialMarket.id, user?.id]);
-
-  const handlePostComment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isLoggedIn || !commentText.trim() || isSubmitting) return;
-
-    setIsSubmitting(true);
-    try {
-      const res = await fetch(`/api/markets/${market.id}/comments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user?.id, content: commentText })
-      });
-      const newComment = await res.json();
-      setMarket((prev: any) => ({
-        ...prev,
-        comments: [newComment, ...prev.comments],
-        _count: { ...prev._count, comments: prev._count.comments + 1 }
-      }));
-      setCommentText('');
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  if (!market) return (
-    <div className="fixed inset-0 z-[120] bg-zinc-950 flex items-center justify-center">
-      <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-    </div>
-  );
-
-  const data = [
-    { time: 'Jan', value: 45 },
-    { time: 'Feb', value: 52 },
-    { time: 'Mar', value: 48 },
-    { time: 'Apr', value: 61 },
-    { time: 'May', value: 55 },
-    { time: 'Jun', value: 67 },
-  ];
-
-  return (
-    <motion.div 
-      initial={{ y: '100%' }}
-      animate={{ y: 0 }}
-      exit={{ y: '100%' }}
-      transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-      className="fixed inset-0 z-[120] bg-zinc-950 flex flex-col"
-    >
-      <div className="p-4 flex items-center justify-between border-b border-white/5">
-        <button onClick={onClose} className="p-2 hover:bg-zinc-900 rounded-full"><ArrowLeft size={24} /></button>
-        <span className="font-bold text-sm uppercase tracking-widest truncate max-w-[200px]">{market.title}</span>
-        <div className="flex items-center gap-1">
-          <button 
-            onClick={onSave} 
-            className={cn("p-2 rounded-full transition-colors", market.userSaved ? "text-emerald-500" : "text-zinc-400 hover:bg-zinc-900")}
-          >
-            <Bookmark size={20} fill={market.userSaved ? "currentColor" : "none"} />
-          </button>
-          <button onClick={onShare} className="p-2 hover:bg-zinc-900 rounded-full text-zinc-400"><Share2 size={20} /></button>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-6 pb-12">
-        <div className="flex gap-2 mb-4">
-          <span className="bg-emerald-500/20 text-emerald-400 text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wider">
-            {market.category}
-          </span>
-        </div>
-        <h1 className="text-2xl font-bold mb-6 leading-tight">{market.title}</h1>
-
-        <div className="h-64 w-full mb-8">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data}>
-              <defs>
-                <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
-              <XAxis dataKey="time" stroke="#ffffff40" fontSize={12} tickLine={false} axisLine={false} />
-              <YAxis hide />
-              <Tooltip 
-                contentStyle={{ backgroundColor: '#18181b', border: 'none', borderRadius: '12px', fontSize: '12px' }}
-                itemStyle={{ color: '#10b981' }}
-              />
-              <Area type="monotone" dataKey="value" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#colorValue)" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4 mb-8">
-          <GlassCard className="flex flex-col gap-1">
-            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">All-time High</span>
-            <span className="text-lg font-bold">82%</span>
-          </GlassCard>
-          <GlassCard className="flex flex-col gap-1">
-            <span className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Volatility</span>
-            <span className="text-lg font-bold text-rose-500">High</span>
-          </GlassCard>
-        </div>
-
-        <div className="space-y-6">
-          <section>
-            <h3 className="text-sm font-bold uppercase tracking-widest text-zinc-500 mb-3 flex items-center gap-2">
-              <Info size={14} /> {t.description}
-            </h3>
-            <p className="text-zinc-400 leading-relaxed text-sm">
-              {market.description}
-            </p>
-          </section>
-
-          <section>
-            <h3 className="text-sm font-bold uppercase tracking-widest text-zinc-500 mb-3 flex items-center gap-2">
-              <MessageCircle size={14} /> {t.comments} ({market._count.comments})
-            </h3>
-            
-            {isLoggedIn && (
-              <form onSubmit={handlePostComment} className="mb-6 flex gap-2">
-                <input 
-                  type="text" 
-                  value={commentText}
-                  onChange={e => setCommentText(e.target.value)}
-                  placeholder="Add a comment..."
-                  className="flex-1 bg-zinc-900 border border-white/10 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-emerald-500"
-                />
-                <Button type="submit" disabled={!commentText.trim() || isSubmitting} className="py-2 px-4">
-                  Post
-                </Button>
-              </form>
-            )}
-
-            <div className="space-y-4">
-              {market.comments.map((c: any) => (
-                <div key={c.id} className="flex gap-3">
-                  <img src={c.user.avatar} className="w-8 h-8 rounded-full bg-zinc-800" />
-                  <div className="flex-1">
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-xs font-bold">@{c.user.handle}</span>
-                      <span className="text-[10px] text-zinc-600">{new Date(c.createdAt).toLocaleDateString()}</span>
-                    </div>
-                    <p className="text-xs text-zinc-400">{c.content}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        </div>
-      </div>
-
-      <div className="p-6 border-t border-white/5 bg-zinc-950 flex gap-4">
-        <Button variant="primary" className="flex-1 py-4 rounded-2xl font-bold text-black">YES {market.yesPercent.toFixed(0)}%</Button>
-        <Button variant="danger" className="flex-1 py-4 rounded-2xl font-bold">NO {market.noPercent.toFixed(0)}%</Button>
-      </div>
-    </motion.div>
-  );
-}
-
-function WaitlistModal({ onClose }: { onClose: () => void }) {
-  const { language } = useAuthStore();
-  const t = translations[language];
-  const [email, setEmail] = useState('');
-  const [submitted, setSubmitted] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await fetch('/api/waitlist', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, intendedAmount: 100 })
-    });
-    setSubmitted(true);
-    trackEvent('waitlist_submission', undefined, { email });
-  };
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[130] bg-black/90 backdrop-blur-md flex items-center justify-center p-6"
-    >
-      <div className="bg-zinc-900 w-full max-w-sm rounded-[2.5rem] p-8 border border-white/10 text-center">
-        {!submitted ? (
-          <>
-            <div className="w-20 h-20 bg-emerald-500/20 rounded-3xl flex items-center justify-center mx-auto mb-6 text-emerald-500">
-              <Wallet size={40} />
-            </div>
-            <h2 className="text-2xl font-bold mb-3">{t.comingSoon}</h2>
-            <p className="text-zinc-400 text-sm mb-8 leading-relaxed">
-              {t.waitlistNote}
-            </p>
-            <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-              <input 
-                type="email" 
-                placeholder={t.enterEmail} 
-                required
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                className="w-full bg-zinc-800 border border-white/5 rounded-2xl px-4 py-4 text-sm focus:outline-none focus:border-emerald-500 transition-colors"
-              />
-              <Button type="submit" className="w-full py-4 rounded-2xl font-bold">{t.joinWaitlist}</Button>
-              <button type="button" onClick={onClose} className="text-zinc-500 text-sm font-medium mt-4 hover:text-zinc-300">{t.backToDemo}</button>
-            </form>
-          </>
-        ) : (
-          <>
-            <div className="w-20 h-20 bg-emerald-500 rounded-3xl flex items-center justify-center mx-auto mb-6 text-black">
-              <CheckCircle2 size={40} />
-            </div>
-            <h2 className="text-2xl font-bold mb-3">{t.onList}</h2>
-            <p className="text-zinc-400 text-sm mb-8 leading-relaxed">
-              {t.launchNote}
-            </p>
-            <Button className="w-full py-4 rounded-2xl font-bold" onClick={onClose}>{t.gotIt}</Button>
-          </>
-        )}
-      </div>
-    </motion.div>
-  );
-}
-
-function BetConfirmation({ side, amount }: { side: 'YES' | 'NO'; amount: number }) {
-  const { language } = useAuthStore();
-  const t = translations[language];
-  return (
-    <motion.div 
-      initial={{ opacity: 0, scale: 0.8 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.8 }}
-      className="fixed inset-0 z-[200] flex items-center justify-center pointer-events-none"
-    >
-      <div className="bg-emerald-500 text-black px-8 py-10 rounded-[3rem] flex flex-col items-center shadow-2xl shadow-emerald-500/40">
-        <CheckCircle2 size={64} className="mb-4" />
-        <h2 className="text-3xl font-black uppercase tracking-tighter">{t.betConfirmed}</h2>
-        <p className="text-lg font-bold opacity-80 mt-1">{side} • {formatPrice(amount, language)}</p>
-      </div>
-    </motion.div>
   );
 }

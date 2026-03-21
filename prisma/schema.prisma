@@ -3,55 +3,115 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
-  id            String    @id @default(cuid())
-  email         String?   @unique
-  handle        String    @unique
-  avatar        String?
-  balance       Float     @default(10000)
-  createdAt     DateTime  @default(now())
-  bets          Bet[]
-  comments      Comment[]
-  likes         Like[]
-  saves         Save[]
-  following     Follow[]  @relation("follower")
-  followers     Follow[]  @relation("following")
-  waitlist      Waitlist?
-  events        AnalyticsEvent[]
+  id        String           @id @default(cuid())
+  email     String?          @unique
+  password  String?
+  provider  String           @default("email")
+  handle    String           @unique
+  avatar    String?
+  balance   Float            @default(10000)
+  totalWinnings Float          @default(0)
+  role      String           @default("USER")
+  createdAt DateTime         @default(now())
+  events    AnalyticsEvent[]
+  bets      Bet[]
+  comments  Comment[]
+  followers Follow[]         @relation("following")
+  following Follow[]         @relation("follower")
+  likes     Like[]
+  proposals MarketProposal[]
+  saves     Save[]
+  waitlist    Waitlist?
+  payments    Payment[]
+  withdrawals Withdrawal[]
+
+  @@index([createdAt])
+}
+
+model Payment {
+  id            String   @id @default(cuid())
+  userId        String
+  amount        Float
+  currency      String
+  status        String   @default("waiting")
+  paymentId     String?  @unique
+  orderId       String   @unique
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([createdAt])
 }
 
 model Market {
-  id            String    @id @default(cuid())
-  title         String
-  description   String
-  category      String
-  imageUrl      String
-  yesPercent    Float     @default(50)
-  noPercent     Float     @default(50)
-  totalPool     Float     @default(0)
-  bettorsCount  Int       @default(0)
-  expiresAt     DateTime
-  createdAt     DateTime  @default(now())
-  creatorId     String
-  bets          Bet[]
-  comments      Comment[]
-  likes         Like[]
-  saves         Save[]
+  id           String       @id @default(cuid())
+  title        String
+  description  String
+  category     String
+  imageUrl     String?
+  videoUrl     String?
+  yesPercent   Float        @default(50)
+  noPercent    Float        @default(50)
+  totalPool    Float        @default(0)
+  bettorsCount Int          @default(0)
+  expiresAt    DateTime
+  createdAt    DateTime     @default(now())
+  creatorId    String
+  bets         Bet[]
+  comments     Comment[]
+  likes        Like[]
+  priceHistory PricePoint[]
+  saves        Save[]
+}
+
+model PricePoint {
+  id        String   @id @default(cuid())
+  marketId  String
+  value     Float
+  createdAt DateTime @default(now())
+  market    Market   @relation(fields: [marketId], references: [id])
+
+  @@index([marketId])
 }
 
 model Bet {
-  id        String   @id @default(cuid())
-  userId    String
-  marketId  String
-  amount    Float
-  side      String   // "YES" or "NO"
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id])
-  market    Market   @relation(fields: [marketId], references: [id])
+  id                 String   @id @default(cuid())
+  userId             String
+  marketId           String?
+  externalMarketId   String?
+  polymarketOrderId  String?
+  amount             Float
+  side               String
+  odds               Float    @default(1)
+  status             String   @default("pending")
+  payout             Float    @default(0)
+  resolvedAt         DateTime?
+  createdAt          DateTime @default(now())
+  market             Market?  @relation(fields: [marketId], references: [id])
+  user               User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([marketId])
+  @@index([externalMarketId])
+}
+
+model Withdrawal {
+  id          String   @id @default(cuid())
+  userId      String
+  amount      Float
+  address     String
+  status      String   @default("pending")
+  createdAt   DateTime @default(now())
+  processedAt DateTime?
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
 }
 
 model Comment {
@@ -60,26 +120,28 @@ model Comment {
   marketId  String
   content   String
   createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id])
   market    Market   @relation(fields: [marketId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([marketId])
 }
 
 model Like {
-  id        String   @id @default(cuid())
-  userId    String
-  marketId  String
-  user      User     @relation(fields: [userId], references: [id])
-  market    Market   @relation(fields: [marketId], references: [id])
+  id       String @id @default(cuid())
+  userId   String
+  marketId String
+  market   Market @relation(fields: [marketId], references: [id])
+  user     User   @relation(fields: [userId], references: [id])
 
   @@unique([userId, marketId])
 }
 
 model Save {
-  id        String   @id @default(cuid())
-  userId    String
-  marketId  String
-  user      User     @relation(fields: [userId], references: [id])
-  market    Market   @relation(fields: [marketId], references: [id])
+  id       String @id @default(cuid())
+  userId   String
+  marketId String
+  market   Market @relation(fields: [marketId], references: [id])
+  user     User   @relation(fields: [userId], references: [id])
 
   @@unique([userId, marketId])
 }
@@ -88,8 +150,8 @@ model Follow {
   id          String @id @default(cuid())
   followerId  String
   followingId String
-  follower    User   @relation("follower", fields: [followerId], references: [id])
   following   User   @relation("following", fields: [followingId], references: [id])
+  follower    User   @relation("follower", fields: [followerId], references: [id])
 
   @@unique([followerId, followingId])
 }
@@ -107,7 +169,26 @@ model AnalyticsEvent {
   id        String   @id @default(cuid())
   eventName String
   userId    String?
-  metadata  String?  // JSON string
+  metadata  String?
   createdAt DateTime @default(now())
   user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([eventName])
+  @@index([createdAt])
+}
+
+model MarketProposal {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  category    String
+  imageUrl    String?
+  videoUrl    String?
+  userId      String
+  status      String   @default("PENDING")
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
 }

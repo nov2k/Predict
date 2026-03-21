@@ -7,16 +7,23 @@ interface User {
   avatar: string;
   balance: number;
   email?: string;
+  role?: string;
 }
 
 interface AuthState {
   user: User | null;
+  token: string | null;
   isLoggedIn: boolean;
   hasDoneFakeBet: boolean;
   language: 'en' | 'ru';
+  isRealMode: boolean;
+  demoBalance: number;
   setUser: (user: User | null) => void;
+  setToken: (token: string | null) => void;
   setHasDoneFakeBet: (val: boolean) => void;
   setLanguage: (lang: 'en' | 'ru') => void;
+  setIsRealMode: (val: boolean) => void;
+  setDemoBalance: (val: number) => void;
   logout: () => void;
 }
 
@@ -24,13 +31,19 @@ export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
       user: null,
+      token: null,
       isLoggedIn: false,
       hasDoneFakeBet: false,
       language: 'en',
+      isRealMode: true,
+      demoBalance: 10000,
       setUser: (user) => set({ user, isLoggedIn: !!user }),
+      setToken: (token) => set({ token }),
       setHasDoneFakeBet: (val) => set({ hasDoneFakeBet: val }),
       setLanguage: (language) => set({ language }),
-      logout: () => set({ user: null, isLoggedIn: false }),
+      setIsRealMode: (isRealMode) => set({ isRealMode }),
+      setDemoBalance: (demoBalance) => set({ demoBalance }),
+      logout: () => set({ user: null, token: null, isLoggedIn: false }),
     }),
     {
       name: 'auth-storage',
