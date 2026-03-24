@@ -8,12 +8,12 @@ export function NavButton({ active, icon, label, onClick }: { active: boolean; i
     <button 
       onClick={onClick}
       className={cn(
-        "flex flex-col items-center gap-1 transition-colors",
+        "touch-nav-btn flex flex-col items-center gap-1 transition-colors",
         active ? "text-emerald-500" : "text-zinc-500 hover:text-zinc-300"
       )}
     >
       {icon}
-      <span className="text-[10px] font-medium uppercase tracking-widest">{label}</span>
+      <span className="touch-nav-label text-[10px] font-medium uppercase tracking-widest leading-none">{label}</span>
     </button>
   );
 }

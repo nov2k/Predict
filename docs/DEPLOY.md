@@ -14,6 +14,19 @@
    # или без миграций:
    npx prisma db push
    ```
+   Поля `Market.skipNeedsVideoQueue`, `Market.publishedToFeed`: после обновления кода выполните `db push` / миграцию на проде.
+
+   **Polymarket-лента:** в публичный `/api/markets` попадают только события с `publishedToFeed = true` (после загрузки видео админ жмёт «Опубликовать»). Чтобы **сохранить прежнее поведение** для уже залитых видео, один раз на проде:
+
+   ```sql
+   UPDATE "Market"
+   SET "publishedToFeed" = true
+   WHERE id LIKE 'poly_%'
+     AND "videoUrl" IS NOT NULL
+     AND btrim("videoUrl") <> '';
+   ```
+
+   Остальные `poly_*` без видео останутся черновиками только в админке.
 3. **Переменные окружения** (минимум):
    - `DATABASE_URL` — PostgreSQL в проде.
    - `JWT_SECRET` — длинная случайная строка.

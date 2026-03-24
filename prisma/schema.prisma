@@ -56,6 +56,10 @@ model Market {
   category     String
   imageUrl     String?
   videoUrl     String?
+  /// Polymarket shadow rows: if true, event stays in feed & «All events» admin but is hidden from «Needs video» queue
+  skipNeedsVideoQueue Boolean @default(false)
+  /// Polymarket shadow: visible in public /api/markets feed only when true (after admin uploads video and publishes)
+  publishedToFeed     Boolean @default(false)
   yesPercent   Float        @default(50)
   noPercent    Float        @default(50)
   totalPool    Float        @default(0)

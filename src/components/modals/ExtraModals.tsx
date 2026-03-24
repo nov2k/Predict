@@ -143,6 +143,7 @@ export function WelcomeModal({ onClose, onTopUp }: { onClose: () => void; onTopU
 
 export function WithdrawTab({ userId, balance, onClose }: { userId?: string; balance: number; onClose: () => void }) {
   const { language } = useAuthStore();
+  const t = translations[language];
   const [amount, setAmount] = useState('');
   const [address, setAddress] = useState('');
   const [loading, setLoading] = useState(false);
@@ -151,9 +152,9 @@ export function WithdrawTab({ userId, balance, onClose }: { userId?: string; bal
 
   const handleWithdraw = async () => {
     const num = Number(amount);
-    if (!num || num <= 0) { setError('Enter a valid amount'); return; }
-    if (num > balance) { setError('Insufficient balance'); return; }
-    if (!address || address.length < 10) { setError('Enter a valid wallet address'); return; }
+    if (!num || num <= 0) { setError(t.enterValidAmount); return; }
+    if (num > balance) { setError(t.insufficientBalanceShort); return; }
+    if (!address || address.length < 10) { setError(t.invalidWalletAddress); return; }
     setLoading(true); setError('');
     try {
       const res = await apiFetch('/api/withdrawals', {
@@ -165,7 +166,7 @@ export function WithdrawTab({ userId, balance, onClose }: { userId?: string; bal
       if (!res.ok) throw new Error(data.error);
       setSuccess(true);
     } catch (e: any) {
-      setError(e.message || 'Withdrawal failed');
+      setError(e.message || t.withdrawalFailedGeneric);
     } finally {
       setLoading(false);
     }
@@ -177,9 +178,11 @@ export function WithdrawTab({ userId, balance, onClose }: { userId?: string; bal
         <div className="w-16 h-16 bg-emerald-500/20 rounded-full flex items-center justify-center">
           <CheckCircle2 size={32} className="text-emerald-500" />
         </div>
-        <h3 className="text-lg font-bold">Withdrawal Requested</h3>
-        <p className="text-zinc-400 text-sm">Your withdrawal of {formatPrice(Number(amount), language)} is being processed. You'll receive funds within 24 hours.</p>
-        <Button className="w-full py-3 rounded-2xl font-bold mt-4" onClick={onClose}>Done</Button>
+        <h3 className="text-lg font-bold">{t.withdrawalRequestedTitle}</h3>
+        <p className="text-zinc-400 text-sm">
+          {t.withdrawalRequestedBody.replace('{amount}', formatPrice(Number(amount), language))}
+        </p>
+        <Button className="w-full py-3 rounded-2xl font-bold mt-4" onClick={onClose}>{t.done}</Button>
       </div>
     );
   }
@@ -192,7 +195,7 @@ export function WithdrawTab({ userId, balance, onClose }: { userId?: string; bal
   return (
     <div className="space-y-4">
       <div className="text-center mb-2">
-        <span className="text-zinc-500 text-xs">Available Balance</span>
+        <span className="text-zinc-500 text-xs">{t.availableBalance}</span>
         <div className="text-2xl font-bold text-white">{formatPrice(balance, language)}</div>
       </div>
       {error && <div className="bg-rose-500/10 border border-rose-500/30 text-rose-400 text-sm rounded-xl px-4 py-2">{error}</div>}
@@ -200,39 +203,41 @@ export function WithdrawTab({ userId, balance, onClose }: { userId?: string; bal
         type="number"
         value={amount}
         onChange={(e) => setAmount(e.target.value)}
-        placeholder="Amount to withdraw"
+        placeholder={t.amountToWithdrawPlaceholder}
+        aria-label={t.amountToWithdrawPlaceholder}
         className="w-full bg-zinc-800 border border-white/5 rounded-2xl px-4 py-4 text-lg font-bold focus:outline-none focus:border-emerald-500"
       />
       <input
         type="text"
         value={address}
         onChange={(e) => setAddress(e.target.value)}
-        placeholder="Wallet address (USDC / Polygon)"
+        placeholder={t.walletAddressUsdcPlaceholder}
+        aria-label={t.walletAddressUsdcPlaceholder}
         className="w-full bg-zinc-800 border border-white/5 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-emerald-500"
       />
       {num > 0 && (
         <div className="bg-zinc-800/50 rounded-2xl p-4 border border-white/5 space-y-2">
           <div className="flex justify-between text-sm">
-            <span className="text-zinc-400">You receive</span>
+            <span className="text-zinc-400">{t.youReceiveLabel}</span>
             <span className="font-bold text-white">{formatPrice(youReceive, language)}</span>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="text-zinc-400">Fee (5%)</span>
+            <span className="text-zinc-400">{t.feePercentLabel}</span>
             <span className="font-bold text-rose-400">-{formatPrice(fee, language)}</span>
           </div>
           <div className="flex justify-between text-sm pt-2 border-t border-white/5">
-            <span className="text-zinc-400">Total deducted</span>
+            <span className="text-zinc-400">{t.totalDeductedLabel}</span>
             <span className="font-bold text-white">{formatPrice(totalDeducted, language)}</span>
           </div>
         </div>
       )}
-      <p className="text-[10px] text-zinc-500">Withdrawals processed within 24h. Min $10. Fee: 5% (min $1).</p>
+      <p className="text-[10px] text-zinc-500">{t.withdrawFooterNote}</p>
       <Button
         className="w-full py-4 rounded-2xl font-bold disabled:opacity-50"
         onClick={handleWithdraw}
         disabled={loading || !amount || !address || num < 10 || totalDeducted > balance}
       >
-        {loading ? 'Processing...' : num > 0 && totalDeducted > balance ? 'Insufficient balance' : 'Request Withdrawal'}
+        {loading ? t.processingGeneric : num > 0 && totalDeducted > balance ? t.insufficientBalanceWithdrawBtn : t.requestWithdrawal}
       </Button>
     </div>
   );
@@ -260,12 +265,12 @@ export function WalletModal({ onClose, onSuccess, showToast }: { onClose: () => 
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        showToast((data as { error?: string }).error || 'Payment could not be started', 'error');
+        showToast((data as { error?: string }).error || t.paymentCouldNotStart, 'error');
         return;
       }
       if (data.payment_url) {
         if (!data.mock && !isTrustedNowpaymentsPaymentUrl(String(data.payment_url))) {
-          showToast('Blocked unsafe payment URL', 'error');
+          showToast(t.blockedUnsafePaymentUrl, 'error');
           return;
         }
         const win = window.open(data.payment_url, '_blank');
@@ -279,11 +284,11 @@ export function WalletModal({ onClose, onSuccess, showToast }: { onClose: () => 
           }, 3000);
         }
       } else {
-        showToast('No payment URL returned', 'error');
+        showToast(t.noPaymentUrlReturned, 'error');
       }
     } catch (error) {
       console.error("Payment error:", error);
-      showToast('Payment error', 'error');
+      showToast(t.paymentErrorGeneric, 'error');
     } finally {
       setLoading(false);
     }
@@ -302,14 +307,14 @@ export function WalletModal({ onClose, onSuccess, showToast }: { onClose: () => 
     >
       <div className="flex justify-between items-center mb-6">
         <h2 id="wallet-modal-title" className="text-xl font-bold">{t.wallet}</h2>
-        <button onClick={onClose} className="p-2 hover:bg-zinc-800 rounded-full"><X size={20} /></button>
+        <button type="button" onClick={onClose} className="p-2 hover:bg-zinc-800 rounded-full" aria-label={t.closeDialogAria}><X size={20} /></button>
       </div>
 
       {!isRealMode && (
         <div className="mb-6 p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-start gap-3">
           <AlertCircle size={18} className="text-amber-500 shrink-0 mt-0.5" />
           <p className="text-[10px] text-amber-200/80 leading-relaxed font-medium">
-            You are currently in Demo Mode. Deposits will be credited to your main balance.
+            {t.demoModeWalletNote}
           </p>
         </div>
       )}

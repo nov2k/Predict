@@ -27,8 +27,115 @@ input[type=number] {
 }
 
 @layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
   body {
     @apply bg-black text-white antialiased;
   }
 }
 
+
+
+/* iPhone / large-icon touch accessibility tuning */
+@media (pointer: coarse) {
+  .touch-ui .touch-main-frame {
+    border-radius: 0;
+  }
+
+  .touch-ui .touch-chip {
+    min-height: 44px;
+    padding: 0.55rem 0.9rem;
+    font-size: 0.95rem;
+  }
+
+  .touch-ui .touch-nav-btn {
+    min-width: 68px;
+    min-height: 58px;
+    justify-content: center;
+  }
+
+  .touch-ui .touch-nav-label {
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    max-width: 72px;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .touch-ui .touch-bottom-nav {
+    padding-top: 0.8rem;
+    padding-bottom: calc(0.9rem + env(safe-area-inset-bottom));
+  }
+
+  .touch-ui .touch-fab {
+    width: 62px;
+    height: 62px;
+    margin-top: -2.2rem;
+    border-radius: 1.05rem;
+  }
+
+  .touch-ui .touch-arrow-btn {
+    padding: 0.75rem;
+  }
+
+  .touch-ui .touch-video-overlay-btn {
+    width: 56px;
+    height: 56px;
+  }
+
+  .touch-ui .touch-action-btn {
+    width: 52px;
+    height: 52px;
+  }
+
+  .touch-ui .touch-bet-btn {
+    min-height: 56px;
+    border-radius: 0.95rem;
+    padding-inline: 0.75rem;
+  }
+
+  .touch-ui .touch-bet-label {
+    font-size: clamp(1.1rem, 3.9vw, 1.3rem);
+    letter-spacing: 0.01em;
+  }
+
+  .touch-ui .touch-market-title {
+    font-size: clamp(1.75rem, 6vw, 2.3rem);
+    line-height: 1.06;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .touch-ui .touch-action-rail {
+    bottom: calc(7.4rem + env(safe-area-inset-bottom));
+    right: 0.55rem;
+    gap: 1.05rem;
+  }
+}
+
+@media (pointer: coarse) and (max-width: 430px) {
+  .touch-ui .touch-main-frame {
+    border-radius: 0;
+  }
+
+  .touch-ui .touch-bottom-nav {
+    padding-left: 0.55rem;
+    padding-right: 0.55rem;
+    gap: 0.15rem;
+  }
+
+  .touch-ui .touch-nav-btn {
+    min-width: 62px;
+  }
+
+  .touch-ui .touch-market-title {
+    font-size: clamp(1.55rem, 6.2vw, 2rem);
+  }
+}

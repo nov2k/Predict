@@ -40,6 +40,34 @@ async function isPolyMarketHiddenFromFeed(marketId: string): Promise<boolean> {
   return row?.category === HIDDEN_MARKET_CATEGORY;
 }
 
+async function isPolyPublishedToFeed(polyId: string): Promise<boolean> {
+  if (!polyId.startsWith("poly_")) return true;
+  const row = await prisma.market.findUnique({
+    where: { id: polyId },
+    select: { publishedToFeed: true },
+  });
+  return Boolean(row?.publishedToFeed);
+}
+
+/** Non-admin users only see poly markets that are published to the app feed. Sends 404 when blocked. */
+async function assertPolyPublicFeedAccess(
+  polyId: string,
+  req: AuthenticatedRequest,
+  res: express.Response
+): Promise<boolean> {
+  if (!polyId.startsWith("poly_")) return true;
+  if (await isPolyMarketHiddenFromFeed(polyId)) {
+    res.status(404).json({ error: "Market not found" });
+    return false;
+  }
+  if (req.auth?.role === "ADMIN") return true;
+  if (!(await isPolyPublishedToFeed(polyId))) {
+    res.status(404).json({ error: "Market not found" });
+    return false;
+  }
+  return true;
+}
+
 const uploadsDir = path.join(process.cwd(), "public", "uploads");
 fs.mkdirSync(uploadsDir, { recursive: true });
 const JWT_SECRET = process.env.JWT_SECRET || "";
@@ -333,6 +361,7 @@ async function ensureMarketExists(marketId: string) {
         totalPool: (poly as any).totalPool ?? 0,
         expiresAt: (poly as any).expiresAt ? new Date((poly as any).expiresAt) : new Date('2030-01-01'),
         creatorId: 'system',
+        publishedToFeed: false,
       }
     });
   } catch (e) {
@@ -351,7 +380,13 @@ async function mergePolyShadowMedia(polyMarkets: any[]) {
 
   const shadows = await prisma.market.findMany({
     where: { id: { in: ids } },
-    select: { id: true, videoUrl: true, createdAt: true },
+    select: {
+      id: true,
+      videoUrl: true,
+      createdAt: true,
+      skipNeedsVideoQueue: true,
+      publishedToFeed: true,
+    },
   });
   const map = new Map(shadows.map((s) => [s.id, s]));
 
@@ -361,8 +396,10 @@ async function mergePolyShadowMedia(polyMarkets: any[]) {
     const overlay =
       raw != null && String(raw).trim().length > 0 ? String(raw).trim() : undefined;
     return {
-      ...m,
+    ...m,
       ...(overlay ? { videoUrl: overlay } : {}),
+      skipNeedsVideoQueue: Boolean(s?.skipNeedsVideoQueue),
+      publishedToFeed: Boolean(s?.publishedToFeed),
       createdAt: m.createdAt ?? (s?.createdAt ? s.createdAt.toISOString() : m.expiresAt),
     };
   });
@@ -409,7 +446,7 @@ app.get("/api/polymarket/tags", polymarketPublicLimiter, async (req, res) => {
   }
 });
 
-app.get("/api/polymarket/markets/:id", polymarketPublicLimiter, async (req, res) => {
+app.get("/api/polymarket/markets/:id", polymarketPublicLimiter, async (req: AuthenticatedRequest, res) => {
   try {
     const raw = String(req.params.id || "").trim();
     if (!raw) {
@@ -417,9 +454,7 @@ app.get("/api/polymarket/markets/:id", polymarketPublicLimiter, async (req, res)
     }
     // One canonical app id for DB hidden-check and Gamma fetch (getPolymarketMarketById strips poly_)
     const canonicalPolyId = raw.startsWith("poly_") ? raw : `poly_${raw}`;
-    if (await isPolyMarketHiddenFromFeed(canonicalPolyId)) {
-      return res.status(404).json({ error: "Polymarket market not found" });
-    }
+    if (!(await assertPolyPublicFeedAccess(canonicalPolyId, req, res))) return;
     const market = await getPolymarketMarketById(canonicalPolyId);
     if (!market) {
       return res.status(404).json({ error: "Polymarket market not found" });
@@ -570,6 +605,16 @@ app.get("/api/markets", marketsListLimiter, async (req: AuthenticatedRequest, re
 
     polyMarkets = await mergePolyShadowMedia(polyMarkets);
 
+    const polyIds = polyMarkets.map((m: any) => m.id).filter((id: string) => typeof id === "string" && id.startsWith("poly_"));
+    if (polyIds.length > 0) {
+      const publishedRows = await prisma.market.findMany({
+        where: { id: { in: polyIds }, publishedToFeed: true },
+        select: { id: true },
+      });
+      const publishedSet = new Set(publishedRows.map((r) => r.id));
+      polyMarkets = polyMarkets.filter((m: any) => publishedSet.has(m.id));
+    }
+
     // Enrich with user's likes/saves from shadow records
     const userId = req.auth?.userId;
     if (userId && polyMarkets.length > 0) {
@@ -620,6 +665,7 @@ app.get("/api/markets/:id", async (req: AuthenticatedRequest, res) => {
       if (await isPolyMarketHiddenFromFeed(req.params.id)) {
         return res.status(404).json({ error: "Market not found" });
       }
+      if (!(await assertPolyPublicFeedAccess(req.params.id, req, res))) return;
 
       const vRaw = shadow?.videoUrl;
       const overlayVideo =
@@ -636,43 +682,47 @@ app.get("/api/markets/:id", async (req: AuthenticatedRequest, res) => {
     }
 
     const userId = req.auth?.userId;
-    const market = await prisma.market.findUnique({
-      where: { id: req.params.id },
-      include: {
-        comments: {
+  const market = await prisma.market.findUnique({
+    where: { id: req.params.id },
+    include: {
+      comments: {
           include: { user: { select: { id: true, handle: true, avatar: true } } },
-          orderBy: { createdAt: 'desc' },
-          take: 20
-        },
+        orderBy: { createdAt: 'desc' },
+        take: 20
+      },
         priceHistory: {
           orderBy: { createdAt: 'asc' },
           take: 50
         },
-        _count: {
+      _count: {
           select: { bets: true, likes: true, comments: true }
-        },
-        likes: userId ? {
-          where: { userId: String(userId) }
-        } : false,
-        saves: userId ? {
-          where: { userId: String(userId) }
-        } : false
-      }
-    });
+      },
+      likes: userId ? {
+        where: { userId: String(userId) }
+      } : false,
+      saves: userId ? {
+        where: { userId: String(userId) }
+      } : false
+    }
+  });
 
-    if (!market) return res.status(404).json({ error: "Market not found" });
+  if (!market) return res.status(404).json({ error: "Market not found" });
 
-    const formattedMarket = {
-      ...market,
-      userLiked: market.likes ? market.likes.length > 0 : false,
-      userSaved: market.saves ? market.saves.length > 0 : false,
-      likes: undefined,
-      saves: undefined
-    };
+  const formattedMarket = {
+    ...market,
+    userLiked: market.likes ? market.likes.length > 0 : false,
+    userSaved: market.saves ? market.saves.length > 0 : false,
+    likes: undefined,
+    saves: undefined
+  };
 
-    res.json(formattedMarket);
+  res.json(formattedMarket);
   } catch (error) {
     console.error("Error fetching market detail:", error);
+    const mapped = mapPrismaClientError(error);
+    if (mapped) {
+      return res.status(mapped.status).json({ error: mapped.error });
+    }
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -692,6 +742,7 @@ app.post("/api/markets/:id/comments", requireAuth, async (req: AuthenticatedRequ
     if (await isPolyMarketHiddenFromFeed(marketId)) {
       return res.status(404).json({ error: "Market not found" });
     }
+    if (marketId.startsWith("poly_") && !(await assertPolyPublicFeedAccess(marketId, req, res))) return;
 
     const comment = await prisma.comment.create({
       data: { userId, marketId, content: text },
@@ -699,6 +750,11 @@ app.post("/api/markets/:id/comments", requireAuth, async (req: AuthenticatedRequ
     });
     res.json(comment);
   } catch (error) {
+    console.error("Comment error:", error);
+    const mapped = mapPrismaClientError(error);
+    if (mapped) {
+      return res.status(mapped.status).json({ error: mapped.error });
+    }
     res.status(500).json({ error: "Failed to post comment" });
   }
 });
@@ -733,6 +789,7 @@ app.post("/api/bets", requireAuth, async (req: AuthenticatedRequest, res) => {
         if (await isPolyMarketHiddenFromFeed(marketId)) {
           return res.status(404).json({ error: "Market not found" });
         }
+        if (!(await assertPolyPublicFeedAccess(marketId, req, res))) return;
 
         const polyMarket = await getPolymarketMarketById(marketId);
         if (!polyMarket) return res.status(400).json({ error: "Polymarket market not found" });
@@ -772,7 +829,7 @@ app.post("/api/bets", requireAuth, async (req: AuthenticatedRequest, res) => {
           });
         } catch (orderErr: any) {
           await prisma.user.updateMany({
-            where: { id: userId },
+        where: { id: userId },
             data: { balance: { increment: numAmount } },
           });
           console.error("Polymarket order failed, refunded:", orderErr);
@@ -850,24 +907,24 @@ app.post("/api/bets", requireAuth, async (req: AuthenticatedRequest, res) => {
 
       const totalPool = market.totalPool + numAmount;
       const impact = (numAmount / (totalPool || 1)) * 40;
-
-      let newYes = market.yesPercent;
-      let newNo = market.noPercent;
+        
+        let newYes = market.yesPercent;
+        let newNo = market.noPercent;
 
       if (sideNorm === "YES") {
-        newYes = Math.min(99, market.yesPercent + impact);
-        newNo = 100 - newYes;
-      } else {
-        newNo = Math.min(99, market.noPercent + impact);
-        newYes = 100 - newNo;
-      }
+          newYes = Math.min(99, market.yesPercent + impact);
+          newNo = 100 - newYes;
+        } else {
+          newNo = Math.min(99, market.noPercent + impact);
+          newYes = 100 - newNo;
+        }
 
       const updatedMarket = await tx.market.update({
-        where: { id: marketId },
-        data: {
-          totalPool,
-          yesPercent: newYes,
-          noPercent: newNo,
+          where: { id: marketId },
+          data: {
+            totalPool,
+            yesPercent: newYes,
+            noPercent: newNo,
           bettorsCount: { increment: 1 },
         },
         include: {
@@ -902,6 +959,10 @@ app.post("/api/bets", requireAuth, async (req: AuthenticatedRequest, res) => {
       }
     }
     console.error("Bet error:", error);
+    const mapped = mapPrismaClientError(error);
+    if (mapped) {
+      return res.status(mapped.status).json({ error: mapped.error });
+    }
     res.status(500).json({ error: "Failed to place bet" });
   }
 });
@@ -921,10 +982,10 @@ app.post("/api/waitlist", waitlistLimiter, async (req: AuthenticatedRequest, res
       intendedAmount = 0;
     }
     const userId = req.auth?.userId;
-    const entry = await prisma.waitlist.create({
+  const entry = await prisma.waitlist.create({
       data: { email, intendedAmount, userId },
-    });
-    res.json(entry);
+  });
+  res.json(entry);
   } catch (error) {
     console.error("Waitlist error:", error);
     const mapped = mapPrismaClientError(error);
@@ -938,13 +999,14 @@ app.post("/api/waitlist", waitlistLimiter, async (req: AuthenticatedRequest, res
 app.post("/api/markets/:id/like", requireAuth, async (req: AuthenticatedRequest, res) => {
   const userId = req.auth!.userId;
   const marketId = req.params.id;
-
+  
   try {
     await ensureMarketExists(marketId);
 
     if (await isPolyMarketHiddenFromFeed(marketId)) {
       return res.status(404).json({ error: "Market not found" });
     }
+    if (marketId.startsWith("poly_") && !(await assertPolyPublicFeedAccess(marketId, req, res))) return;
 
     const existing = await prisma.like.findUnique({
       where: { userId_marketId: { userId, marketId } }
@@ -962,6 +1024,11 @@ app.post("/api/markets/:id/like", requireAuth, async (req: AuthenticatedRequest,
       res.json({ liked: true });
     }
   } catch (error) {
+    console.error("Like error:", error);
+    const mapped = mapPrismaClientError(error);
+    if (mapped) {
+      return res.status(mapped.status).json({ error: mapped.error });
+    }
     res.status(500).json({ error: "Failed to toggle like" });
   }
 });
@@ -969,13 +1036,14 @@ app.post("/api/markets/:id/like", requireAuth, async (req: AuthenticatedRequest,
 app.post("/api/markets/:id/save", requireAuth, async (req: AuthenticatedRequest, res) => {
   const userId = req.auth!.userId;
   const marketId = req.params.id;
-
+  
   try {
     await ensureMarketExists(marketId);
 
     if (await isPolyMarketHiddenFromFeed(marketId)) {
       return res.status(404).json({ error: "Market not found" });
     }
+    if (marketId.startsWith("poly_") && !(await assertPolyPublicFeedAccess(marketId, req, res))) return;
 
     const existing = await prisma.save.findUnique({
       where: { userId_marketId: { userId, marketId } }
@@ -993,6 +1061,11 @@ app.post("/api/markets/:id/save", requireAuth, async (req: AuthenticatedRequest,
       res.json({ saved: true });
     }
   } catch (error) {
+    console.error("Save error:", error);
+    const mapped = mapPrismaClientError(error);
+    if (mapped) {
+      return res.status(mapped.status).json({ error: mapped.error });
+    }
     res.status(500).json({ error: "Failed to toggle save" });
   }
 });
@@ -1021,12 +1094,16 @@ app.post("/api/analytics", analyticsLimiter, async (req: AuthenticatedRequest, r
 
     const validUserId = req.auth?.userId ?? null;
 
-    const event = await prisma.analyticsEvent.create({
+  const event = await prisma.analyticsEvent.create({
       data: { eventName: eventName.trim(), userId: validUserId, metadata: metaStr },
-    });
-    res.json(event);
+  });
+  res.json(event);
   } catch (error) {
     console.error("Analytics error:", error);
+    const mapped = mapPrismaClientError(error);
+    if (mapped) {
+      return res.status(mapped.status).json({ error: mapped.error });
+    }
     res.status(500).json({ error: "Failed to log event" });
   }
 });
@@ -1089,6 +1166,11 @@ app.post("/api/proposals/:id/approve", requireAuth, requireAdmin, async (req, re
     });
     res.json(result);
   } catch (error) {
+    console.error("Approve proposal error:", error);
+    const mapped = mapPrismaClientError(error);
+    if (mapped) {
+      return res.status(mapped.status).json({ error: mapped.error });
+    }
     res.status(500).json({ error: "Failed to approve proposal" });
   }
 });
@@ -1188,13 +1270,13 @@ app.post("/api/users/:id/refill", requireAuth, requireAdmin, async (req, res) =>
 // Static path must be registered before `/api/users/:id` or `rankings` is captured as :id.
 app.get("/api/users/rankings", async (req, res) => {
   try {
-    const users = await prisma.user.findMany({
+  const users = await prisma.user.findMany({
       orderBy: { totalWinnings: "desc" },
-      select: {
-        id: true,
-        handle: true,
-        avatar: true,
-        balance: true,
+    select: {
+      id: true,
+      handle: true,
+      avatar: true,
+      balance: true,
         totalWinnings: true,
         _count: {
           select: { bets: true },
@@ -1264,7 +1346,11 @@ app.get("/api/admin/feed-events", requireAuth, requireAdmin, async (req, res) =>
     if (needsVideo) {
       polyMarkets = polyMarkets.filter((m: any) => {
         const v = m.videoUrl;
-        return v == null || String(v).trim() === "";
+        const noCustomVideo = v == null || String(v).trim() === "";
+        if (!noCustomVideo) return false;
+        if (m.skipNeedsVideoQueue) return false;
+        if (m.publishedToFeed) return false;
+        return true;
       });
       polyMarkets = polyMarkets.slice(offset, offset + limit);
     }
@@ -1276,28 +1362,61 @@ app.get("/api/admin/feed-events", requireAuth, requireAdmin, async (req, res) =>
   }
 });
 
-// Admin: attach custom loop video to a Polymarket event (shadow row)
+// Admin: video overlay, publish to public feed, skip-needs-video flag (Polymarket shadow rows)
 app.patch("/api/admin/markets/:id/video", requireAuth, requireAdmin, async (req, res) => {
   const { id } = req.params;
   if (!id.startsWith("poly_")) {
     return res.status(400).json({ error: "Only Polymarket events (poly_*) support feed video overlay" });
   }
 
-  const { videoUrl } = req.body as { videoUrl?: string | null };
-  if (videoUrl !== null && videoUrl !== undefined && typeof videoUrl !== "string") {
-    return res.status(400).json({ error: "videoUrl must be a string or null" });
+  const body = req.body as {
+    videoUrl?: string | null;
+    skipNeedsVideoQueue?: boolean;
+    publishedToFeed?: boolean;
+  };
+  const data: {
+    videoUrl?: string | null;
+    skipNeedsVideoQueue?: boolean;
+    publishedToFeed?: boolean;
+  } = {};
+
+  if ("videoUrl" in body) {
+    const videoUrl = body.videoUrl;
+    if (videoUrl !== null && videoUrl !== undefined && typeof videoUrl !== "string") {
+      return res.status(400).json({ error: "videoUrl must be a string or null" });
+    }
+    if (videoUrl === null || videoUrl === undefined) {
+      data.videoUrl = null;
+    } else {
+      const t = String(videoUrl).trim();
+      if (t.length === 0) {
+        data.videoUrl = null;
+      } else if (/^https?:\/\//i.test(t) || t.startsWith("/uploads/")) {
+        data.videoUrl = t;
+      } else {
+        return res.status(400).json({ error: "videoUrl must be http(s) URL or /uploads/ path" });
+      }
+    }
   }
 
-  let normalized: string | null = null;
-  if (videoUrl !== null && videoUrl !== undefined) {
-    const t = String(videoUrl).trim();
-    if (t.length === 0) {
-      normalized = null;
-    } else if (/^https?:\/\//i.test(t) || t.startsWith("/uploads/")) {
-      normalized = t;
-    } else {
-      return res.status(400).json({ error: "videoUrl must be http(s) URL or /uploads/ path" });
+  if ("skipNeedsVideoQueue" in body) {
+    if (typeof body.skipNeedsVideoQueue !== "boolean") {
+      return res.status(400).json({ error: "skipNeedsVideoQueue must be a boolean" });
     }
+    data.skipNeedsVideoQueue = body.skipNeedsVideoQueue;
+  }
+
+  if ("publishedToFeed" in body) {
+    if (typeof body.publishedToFeed !== "boolean") {
+      return res.status(400).json({ error: "publishedToFeed must be a boolean" });
+    }
+    data.publishedToFeed = body.publishedToFeed;
+  }
+
+  if (Object.keys(data).length === 0) {
+    return res.status(400).json({
+      error: "Provide videoUrl, skipNeedsVideoQueue, and/or publishedToFeed",
+    });
   }
 
   try {
@@ -1305,10 +1424,43 @@ app.patch("/api/admin/markets/:id/video", requireAuth, requireAdmin, async (req,
     if (!shadow) {
       return res.status(404).json({ error: "Polymarket market not found" });
     }
+
+    let nextVideo: string | null =
+      shadow.videoUrl != null && String(shadow.videoUrl).trim() !== ""
+        ? String(shadow.videoUrl).trim()
+        : null;
+    if ("videoUrl" in body) {
+      nextVideo =
+        data.videoUrl != null && String(data.videoUrl).trim() !== ""
+          ? String(data.videoUrl).trim()
+          : null;
+    }
+
+    if ("videoUrl" in body) {
+      const cleared =
+        data.videoUrl === null ||
+        (typeof data.videoUrl === "string" && data.videoUrl.trim() === "");
+      if (cleared) {
+        data.publishedToFeed = false;
+      }
+    }
+
+    if (data.publishedToFeed === true) {
+      if (!nextVideo) {
+        return res.status(400).json({
+          error: "Upload a loop video before publishing to the public feed",
+        });
+      }
+    }
+
     const updated = await prisma.market.update({
       where: { id },
-      data: { videoUrl: normalized },
-      select: { id: true, videoUrl: true },
+      data,
+      select: { id: true, videoUrl: true, skipNeedsVideoQueue: true, publishedToFeed: true },
+    });
+    console.log("[admin] poly feed media updated", id, {
+      hasVideo: Boolean(updated.videoUrl && String(updated.videoUrl).trim()),
+      publishedToFeed: updated.publishedToFeed,
     });
     res.json(updated);
   } catch (error) {
@@ -1345,9 +1497,9 @@ app.get("/api/admin/users", requireAuth, requireAdmin, async (req, res) => {
           balance: true,
           role: true,
           createdAt: true,
-          _count: {
-            select: { bets: true }
-          }
+      _count: {
+        select: { bets: true }
+      }
         }
       }),
       prisma.user.count({ where })
@@ -1423,12 +1575,12 @@ app.post("/api/admin/users/:id/role", requireAuth, requireAdmin, async (req: Aut
 
 app.get("/api/users/:id/bets", requireAuth, requireSelfOrAdmin("id"), async (req, res) => {
   try {
-    const bets = await prisma.bet.findMany({
-      where: { userId: req.params.id },
-      include: { market: true },
-      orderBy: { createdAt: 'desc' }
-    });
-    res.json(bets);
+  const bets = await prisma.bet.findMany({
+    where: { userId: req.params.id },
+    include: { market: true },
+    orderBy: { createdAt: 'desc' }
+  });
+  res.json(bets);
   } catch (error) {
     console.error("User bets error:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -1437,18 +1589,18 @@ app.get("/api/users/:id/bets", requireAuth, requireSelfOrAdmin("id"), async (req
 
 app.get("/api/users/:id/saves", requireAuth, requireSelfOrAdmin("id"), async (req, res) => {
   try {
-    const saves = await prisma.save.findMany({
-      where: { userId: req.params.id },
-      include: { market: {
-        include: {
-          _count: {
-            select: { bets: true, comments: true, likes: true }
-          }
+  const saves = await prisma.save.findMany({
+    where: { userId: req.params.id },
+    include: { market: {
+      include: {
+        _count: {
+          select: { bets: true, comments: true, likes: true }
         }
-      } },
-      orderBy: { id: 'desc' }
-    });
-    res.json(saves.map(s => s.market));
+      }
+    } },
+    orderBy: { id: 'desc' }
+  });
+  res.json(saves.map(s => s.market));
   } catch (error) {
     console.error("User saves error:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -1946,25 +2098,25 @@ async function startServer() {
     await prisma.$connect();
     console.log("Database connected successfully.");
 
-    if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== "production") {
       console.log("Initializing Vite in middleware mode...");
-      const vite = await createViteServer({
-        server: { middlewareMode: true },
-        appType: "spa",
-      });
-      app.use(vite.middlewares);
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
       console.log("Vite middleware initialized.");
-    } else {
+  } else {
       const distPath = path.join(process.cwd(), "dist");
       app.use(express.static(distPath));
-      app.get("*", (req, res) => {
+    app.get("*", (req, res) => {
         res.sendFile(path.join(distPath, "index.html"));
-      });
-    }
+    });
+  }
 
     const server = app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Server running on http://localhost:${PORT}`);
-    });
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
     server.on("error", (err: any) => {
       if (err?.code === "EADDRINUSE") {
         console.error(`Port ${PORT} is already in use. Stop the other process or change PORT.`);

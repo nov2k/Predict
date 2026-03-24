@@ -2,7 +2,7 @@
 
 **Правило:** пункты ниже — только учёт. **Не чинить массово**, пока не скажут «можно фиксить» (тогда брать по приоритету P0 → P1 → P2).
 
-**Последнее обновление беклога:** 2026-03-20 (DONE-38: аудит перед продом — лимиты, Prisma 409/404, a11y диалогов, история, удалён дубликат `App.tsx`).
+**Последнее обновление беклога:** 2026-03-20 (DONE-39: i18n Auth/Wallet/Withdraw/MarketDetail, Escape закрывает модалки, cleanup GSI в AuthModal, Prisma P2002/P2025 на комментарии/ставки/like/save/analytics/approve/market detail).
 
 ---
 
@@ -47,6 +47,7 @@
 | DONE-35 | BL-069 / BL-079 / BL-084 | **Poly detail:** один `canonicalPolyId` для `isPolyMarketHiddenFromFeed` и `getPolymarketMarketById`; пустой id → 400. **Даты:** `formatLocaleDate` / `formatShortMonthDay*` в `utils.ts`, карточки/история/админ/деталь/график с `language`. **Seed:** `findFirst` по `title`+`creatorId`, update или create; `pricePoint` только если ещё нет точек. |
 | DONE-36 | Структура + BL-075 (частично) | Монолит `App.tsx` разнесён по `src/views/`, `src/components/*`, `src/types`, `src/lib/api.ts`, `src/constants/categories.tsx`. **i18n:** названия категорий ленты, лейбл «Категории», тексты загрузки/конца ленты, роли в профиле, пустое «Сохранённые», тренд на карточке, сайдбар-теглайн, «Создать событие», подсказки пополнения, демо-тосты, шаблон шаринга. См. `src/README.md`. |
 | DONE-38 | Аудит «в прод» | **Rate limit:** `GET /api/markets`, публичные `GET /api/polymarket/*` (markets, tags, market/:id, orderbook), `GET /api/health`. **Prisma:** `P2002`→409, `P2025`→404 в register / proposals / waitlist catch. **a11y:** `role="dialog"`, `aria-modal`, `aria-labelledby` на основных модалках. **HistoryView:** `res.ok`, i18n строк ставок. Удалён корневой дубликат `App.tsx` (BL-058). Чеклист: `docs/DEPLOY.md`. |
+| DONE-39 | BL-075 / BL-078 / BL-066 (дожим) | **i18n:** строки в `AuthModal`, `WalletModal`/`WithdrawTab`, блок статов и комментариев в `MarketDetail`. **a11y:** `aria-label` на кнопках детали/кошелька; **Escape** закрывает верхнюю модалку в `App.tsx`; в `AuthModal` — удаление `<script>` GSI при unmount. **Сервер:** `mapPrismaClientError` в catch для комментариев, внешнего catch ставок, like/save, analytics, approve proposal, деталя маркета. |
 
 **Важно после деплоя:** задать `ADMIN_EMAILS` в `.env` для выдачи роли ADMIN (раньше были захардкоженные адреса).
 
@@ -132,7 +133,7 @@
 | BL-063 | ~~P1~~ | CORS | **Исправлено** (DONE-34): `cors` + env `CORS_ORIGINS`; без env — поведение как раньше (same-origin). |
 | BL-064 | P2 | `attachAuthIfPresent` | Битый Bearer **молча игнорируется** (аноним) — ожидание 401 у части клиентов может ломаться (продуктовое решение). |
 | BL-065 | P2 | Rate limit | **Частично** (DONE-38): + лимиты на `GET /api/markets`, публичные `GET /api/polymarket/*`, `GET /api/health`; ранее waitlist/analytics. Webhook по-прежнему только подпись. |
-| BL-066 | P2 | Обработчики | **Частично** (DONE-38): маппинг Prisma `P2002`/`P2025` в register, proposals create, waitlist; остальные пути — по-прежнему общий 500. |
+| BL-066 | P2 | Обработчики | **Частично** (DONE-38 + 39): + comments, bets (внешний catch), like/save, analytics, approve proposal, `GET` market detail; прочие редкие пути — по-прежнему общий 500 при неизвестных Prisma-кодах. |
 | BL-067 | ~~P2~~ | `POST /api/waitlist` | **Исправлено** (DONE-33): формат email, `intendedAmount` число ≥0, rate limit. |
 | BL-068 | ~~P2~~ | `POST /api/analytics` | **Исправлено** (DONE-33): валидация `eventName`, cap metadata, rate limit. |
 | BL-069 | ~~P2~~ | `GET /api/polymarket/markets/:id` | **Исправлено** (DONE-35): одна каноническая форма `poly_*` для проверки скрытия и загрузки Gamma; пустой id — 400. |
@@ -141,10 +142,10 @@
 | BL-072 | ~~P1~~ | `RankingView` | **Исправлено** (DONE-33): `u._count?.bets`. |
 | BL-073 | ~~P1~~ | `fetchMarkets` | **Исправлено** (DONE-33): `hasMore` при `limit=100` — порог **100**. |
 | BL-074 | ~~P1~~ | `MarketDetail` | **Исправлено** (DONE-33): после комментария без spread тела ответа на корень маркета. |
-| BL-075 | P2 | `App.tsx` i18n | **Частично** (DONE-36 + 38): + строки истории ставок (`betRow*`, `polymarketBetTitle`). Остаётся: AuthModal, MarketDetail (статы/плейсхолдеры), Wallet/Withdraw, часть админки. |
+| BL-075 | ~~P2~~ | `App.tsx` i18n | **Исправлено** (DONE-39): AuthModal, Wallet/Withdraw, статы/комментарии в MarketDetail. Админка — по запросу отдельным проходом. |
 | BL-076 | ~~P2~~ | Admin modal | **Исправлено** (DONE-33): тосты `grantBalanceSuccess` / `grantWinningsSuccess`. |
 | BL-077 | ~~P2~~ | `RankingView` | **Исправлено** (DONE-33): `res.ok`, флаг отмены при unmount. |
-| BL-078 | P2 | a11y | **Частично** (DONE-38): основные модалки — `role="dialog"`, `aria-modal`, `aria-labelledby`. Остаётся: focus trap, Escape, `aria-label` на иконках; `alt=""` на лидерборде — DONE-33. |
+| BL-078 | P2 | a11y | **Частично** (DONE-38 + 39): + Escape (верхняя модалка), `aria-label` на детали рынка / кошелёк, `alt=""` у аватаров комментариев. **Остаётся:** focus trap внутри диалогов (библиотека или ручной `focus-scope`). |
 | BL-079 | ~~P2~~ | Даты | **Исправлено** (DONE-35): локаль `en-US` / `ru-RU` через хелперы в `utils.ts` и `language` из стора. |
 | BL-080 | ~~P2~~ | `RankingView` | **Исправлено** (DONE-33): текст пустого состояния `leaderboardEmpty`. |
 | BL-081 | ~~P2~~ | `fetchMarkets` | **Исправлено** (DONE-34): тост при catch и при `!res.ok` (первая загрузка / подгрузка). |

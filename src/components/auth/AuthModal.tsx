@@ -17,16 +17,17 @@ export function AuthModal({ onClose, onLoginSuccess }: { onClose: () => void; on
   const googleBtnRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    let scriptEl: HTMLScriptElement | null = null;
     const initGoogle = async () => {
       try {
         const cfgRes = await apiFetch('/api/config');
         const cfg = await cfgRes.json();
         if (!cfg.googleClientId) return;
 
-        const script = document.createElement('script');
-        script.src = 'https://accounts.google.com/gsi/client';
-        script.async = true;
-        script.onload = () => {
+        scriptEl = document.createElement('script');
+        scriptEl.src = 'https://accounts.google.com/gsi/client';
+        scriptEl.async = true;
+        scriptEl.onload = () => {
           if ((window as any).google?.accounts?.id) {
             (window as any).google.accounts.id.initialize({
               client_id: cfg.googleClientId,
@@ -44,10 +45,17 @@ export function AuthModal({ onClose, onLoginSuccess }: { onClose: () => void; on
             }
           }
         };
-        document.body.appendChild(script);
-      } catch {}
+        document.body.appendChild(scriptEl);
+      } catch {
+        /* ignore */
+      }
     };
     initGoogle();
+    return () => {
+      if (scriptEl?.parentNode) {
+        scriptEl.parentNode.removeChild(scriptEl);
+      }
+    };
   }, []);
 
   const handleGoogleResponse = async (response: any) => {
@@ -60,7 +68,7 @@ export function AuthModal({ onClose, onLoginSuccess }: { onClose: () => void; on
         body: JSON.stringify({ credential: response.credential }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Google sign-in failed');
+      if (!res.ok) throw new Error(data.error || t.googleSignInFailed);
       onLoginSuccess(data);
     } catch (e: any) {
       setError(e.message);
@@ -71,8 +79,8 @@ export function AuthModal({ onClose, onLoginSuccess }: { onClose: () => void; on
 
   const handleSubmit = async () => {
     setError('');
-    if (!email || !email.includes('@')) { setError('Enter a valid email'); return; }
-    if (!password || password.length < 6) { setError('Password must be at least 6 characters'); return; }
+    if (!email || !email.includes('@')) { setError(t.authValidEmail); return; }
+    if (!password || password.length < 6) { setError(t.authPasswordMin); return; }
 
     setLoading(true);
     try {
@@ -83,7 +91,7 @@ export function AuthModal({ onClose, onLoginSuccess }: { onClose: () => void; on
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Authentication failed');
+      if (!res.ok) throw new Error(data.error || t.authFailedGeneric);
       onLoginSuccess(data);
     } catch (e: any) {
       setError(e.message);
@@ -106,9 +114,9 @@ export function AuthModal({ onClose, onLoginSuccess }: { onClose: () => void; on
         <div className="w-20 h-20 bg-emerald-500/20 rounded-3xl flex items-center justify-center mx-auto mb-6 text-emerald-500">
           <TrendingUp size={40} />
         </div>
-        <h2 id="auth-modal-title" className="text-2xl font-bold mb-3">{mode === 'register' ? 'Create Account' : t.joinMarket}</h2>
+        <h2 id="auth-modal-title" className="text-2xl font-bold mb-3">{mode === 'register' ? t.createAccountTitle : t.joinMarket}</h2>
         <p className="text-zinc-400 text-sm mb-6 leading-relaxed">
-          {mode === 'register' ? 'Sign up to start predicting and earning.' : t.authNote}
+          {mode === 'register' ? t.authRegisterSubtitle : t.authNote}
         </p>
 
         {error && (
@@ -122,7 +130,8 @@ export function AuthModal({ onClose, onLoginSuccess }: { onClose: () => void; on
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="Email"
+            placeholder={t.emailPlaceholder}
+            aria-label={t.emailPlaceholder}
             className="w-full bg-zinc-800 border border-white/5 rounded-2xl px-4 py-4 text-sm focus:outline-none focus:border-emerald-500 transition-colors"
             onKeyDown={e => e.key === 'Enter' && handleSubmit()}
           />
@@ -130,7 +139,8 @@ export function AuthModal({ onClose, onLoginSuccess }: { onClose: () => void; on
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="Password"
+            placeholder={t.passwordPlaceholder}
+            aria-label={t.passwordPlaceholder}
             className="w-full bg-zinc-800 border border-white/5 rounded-2xl px-4 py-4 text-sm focus:outline-none focus:border-emerald-500 transition-colors"
             onKeyDown={e => e.key === 'Enter' && handleSubmit()}
           />
@@ -139,24 +149,25 @@ export function AuthModal({ onClose, onLoginSuccess }: { onClose: () => void; on
             onClick={handleSubmit}
             disabled={loading}
           >
-            {loading ? 'Loading...' : mode === 'register' ? 'Sign Up' : 'Sign In'}
+            {loading ? t.loadingGeneric : mode === 'register' ? t.signUp : t.signIn}
           </Button>
 
           <button
+            type="button"
             onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); }}
             className="text-emerald-500 text-sm font-medium hover:text-emerald-400"
           >
-            {mode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
+            {mode === 'login' ? t.authSwitchToRegister : t.authSwitchToLogin}
           </button>
 
           <div className="relative my-2">
             <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/5"></div></div>
-            <div className="relative flex justify-center text-[10px] uppercase tracking-widest"><span className="bg-zinc-900 px-2 text-zinc-500">or</span></div>
+            <div className="relative flex justify-center text-[10px] uppercase tracking-widest"><span className="bg-zinc-900 px-2 text-zinc-500">{t.orDivider}</span></div>
           </div>
 
           <div ref={googleBtnRef} className="w-full flex justify-center" />
 
-          <button onClick={onClose} className="text-zinc-500 text-sm font-medium mt-2 hover:text-zinc-300">{t.maybeLater}</button>
+          <button type="button" onClick={onClose} className="text-zinc-500 text-sm font-medium mt-2 hover:text-zinc-300">{t.maybeLater}</button>
         </div>
     </motion.div>
   );

@@ -5,6 +5,10 @@ export interface Market {
   category: string;
   imageUrl: string;
   videoUrl?: string;
+  /** Polymarket admin: excluded from «Needs video» queue only */
+  skipNeedsVideoQueue?: boolean;
+  /** Polymarket: shown in public feed */
+  publishedToFeed?: boolean;
   yesPercent: number;
   noPercent: number;
   totalPool: number;

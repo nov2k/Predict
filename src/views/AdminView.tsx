@@ -28,6 +28,8 @@ export function AdminView({ onBack, onRefreshMarkets, showToast }: { onBack: () 
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [eventSearch, setEventSearch] = useState('');
   const [eventVideoBusyId, setEventVideoBusyId] = useState<string | null>(null);
+  const [eventFlagsBusyId, setEventFlagsBusyId] = useState<string | null>(null);
+  const [eventPublishBusyId, setEventPublishBusyId] = useState<string | null>(null);
 
   const fetchData = async (opts?: { silent?: boolean; usersPage?: number }) => {
     const silent = Boolean(opts?.silent);
@@ -128,16 +130,30 @@ export function AdminView({ onBack, onRefreshMarkets, showToast }: { onBack: () 
     return () => clearTimeout(timer);
   }, [eventSearch, adminTab]);
 
-  const patchEventVideo = async (marketId: string, videoUrl: string | null) => {
+  const patchFeedEventMedia = async (
+    marketId: string,
+    payload: { videoUrl?: string | null; skipNeedsVideoQueue?: boolean; publishedToFeed?: boolean },
+    toastOk?: string
+  ) => {
     const res = await apiFetch(`/api/admin/markets/${marketId}/video`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ videoUrl }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to save video');
-    showToast(videoUrl ? 'Video saved for event' : 'Video removed', 'success');
+    if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to save');
+    if (toastOk) showToast(toastOk, 'success');
     await fetchData({ silent: true });
+  };
+
+  const patchEventVideo = async (marketId: string, videoUrl: string | null) => {
+    await patchFeedEventMedia(
+      marketId,
+      videoUrl
+        ? { videoUrl, publishedToFeed: true }
+        : { videoUrl: null },
+      videoUrl ? t.adminVideoSavedPublishedToast : t.adminVideoRemovedToast
+    );
   };
 
   const handleEventVideoFile = async (marketId: string, file: File | null) => {
@@ -334,9 +350,25 @@ export function AdminView({ onBack, onRefreshMarkets, showToast }: { onBack: () 
             <div key="active-markets-list" className="space-y-6">
               {activeMarkets?.map((m, i) => (
                 <GlassCard key={`admin-market-${m.id || i}-${i}`} className="space-y-4">
-                  <div className="flex justify-between items-start gap-2">
-                    <div className="text-[10px] font-bold px-2 py-1 rounded uppercase tracking-widest bg-emerald-500/20 text-emerald-500">
-                      {t.adminFeedEventBadge}
+                  <div className="flex justify-between items-start gap-2 flex-wrap">
+                    <div className="flex flex-wrap gap-2">
+                      <div className="text-[10px] font-bold px-2 py-1 rounded uppercase tracking-widest bg-emerald-500/20 text-emerald-500">
+                        {t.adminFeedEventBadge}
+                      </div>
+                      {m.skipNeedsVideoQueue ? (
+                        <div className="text-[10px] font-bold px-2 py-1 rounded uppercase tracking-widest bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                          {t.adminSkipNeedsVideoBadge}
+                        </div>
+                      ) : null}
+                      {m.publishedToFeed ? (
+                        <div className="text-[10px] font-bold px-2 py-1 rounded uppercase tracking-widest bg-emerald-500/25 text-emerald-400 border border-emerald-500/40">
+                          {t.adminInFeedBadge}
+                        </div>
+                      ) : (
+                        <div className="text-[10px] font-bold px-2 py-1 rounded uppercase tracking-widest bg-zinc-700 text-zinc-400 border border-white/10">
+                          {t.adminDraftBadge}
+                        </div>
+                      )}
                     </div>
                     <div className="text-[10px] text-zinc-500 text-right shrink-0">
                       {m.createdAt && !Number.isNaN(Date.parse(m.createdAt))
@@ -403,6 +435,82 @@ export function AdminView({ onBack, onRefreshMarkets, showToast }: { onBack: () 
                         {eventVideoBusyId === m.id ? '…' : 'Remove custom video'}
                       </Button>
                     ) : null}
+                    <label className="flex items-start gap-3 p-3 rounded-xl bg-zinc-800/40 border border-white/5 cursor-pointer hover:bg-zinc-800/60 transition-colors">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 rounded border-zinc-600"
+                        checked={Boolean(m.skipNeedsVideoQueue)}
+                        disabled={eventFlagsBusyId === m.id}
+                        onChange={async (e) => {
+                          setEventFlagsBusyId(m.id);
+                          try {
+                            await patchFeedEventMedia(
+                              m.id,
+                              { skipNeedsVideoQueue: e.target.checked },
+                              t.adminSkipNeedsVideoToast
+                            );
+                          } catch (err) {
+                            showToast(err instanceof Error ? err.message : 'Failed', 'error');
+                          } finally {
+                            setEventFlagsBusyId(null);
+                          }
+                        }}
+                      />
+                      <span className="text-xs text-zinc-300 leading-snug">
+                        <span className="font-bold text-zinc-200 block mb-0.5">{t.adminSkipNeedsVideoLabel}</span>
+                        {t.adminSkipNeedsVideoHelp}
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    {m.publishedToFeed ? (
+                      <Button
+                        variant="outline"
+                        className="w-full py-3 text-sm font-bold border-rose-500/40 text-rose-300 hover:bg-rose-500/10"
+                        disabled={eventPublishBusyId === m.id}
+                        onClick={async () => {
+                          setEventPublishBusyId(m.id);
+                          try {
+                            await patchFeedEventMedia(
+                              m.id,
+                              { publishedToFeed: false },
+                              t.adminUnpublishFromFeedToast
+                            );
+                            if (onRefreshMarkets) queueMicrotask(() => onRefreshMarkets());
+                          } catch (e) {
+                            showToast(e instanceof Error ? e.message : 'Failed', 'error');
+                          } finally {
+                            setEventPublishBusyId(null);
+                          }
+                        }}
+                      >
+                        {eventPublishBusyId === m.id ? '…' : t.adminUnpublishFromFeed}
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="primary"
+                        className="w-full py-3 text-sm font-bold"
+                        disabled={!m.videoUrl || eventPublishBusyId === m.id}
+                        onClick={async () => {
+                          setEventPublishBusyId(m.id);
+                          try {
+                            await patchFeedEventMedia(
+                              m.id,
+                              { publishedToFeed: true },
+                              t.adminPublishToFeedToast
+                            );
+                            if (onRefreshMarkets) queueMicrotask(() => onRefreshMarkets());
+                          } catch (e) {
+                            showToast(e instanceof Error ? e.message : 'Failed', 'error');
+                          } finally {
+                            setEventPublishBusyId(null);
+                          }
+                        }}
+                      >
+                        {eventPublishBusyId === m.id ? '…' : t.adminPublishToFeed}
+                      </Button>
+                    )}
                   </div>
 
                   <Button
@@ -412,7 +520,7 @@ export function AdminView({ onBack, onRefreshMarkets, showToast }: { onBack: () 
                     onClick={() => handleAction(m.id, 'deleteMarket')}
                   >
                     <Trash2 size={16} className="mr-2" />{' '}
-                    {actionLoadingId === `deleteMarket:${m.id}` ? 'Deleting...' : 'Hide from feed'}
+                    {actionLoadingId === `deleteMarket:${m.id}` ? 'Deleting...' : t.adminHideFromFeed}
                   </Button>
                 </GlassCard>
               ))}

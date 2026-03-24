@@ -10,6 +10,8 @@ import {
   History,
   User as UserIcon,
   Trophy,
+  ChevronUp,
+  ChevronDown,
 } from 'lucide-react';
 import { cn, formatPrice, trackEvent } from './lib/utils';
 import { useAuthStore } from './store/useAuthStore';
@@ -70,6 +72,47 @@ export default function App() {
       useAuthStore.getState().logout();
     }
   }, [user, token]);
+
+  // Close topmost modal on Escape (a11y)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (showTopUpModal) {
+        setShowTopUpModal(false);
+        return;
+      }
+      if (showWelcomeModal) {
+        setShowWelcomeModal(false);
+        return;
+      }
+      if (showBetModal) {
+        setShowBetModal(null);
+        return;
+      }
+      if (showAuthModal) {
+        setShowAuthModal(false);
+        return;
+      }
+      if (showWaitlist) {
+        setShowWaitlist(false);
+        setIsRealMode(false);
+        return;
+      }
+      if (showDetail) {
+        setShowDetail(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    showTopUpModal,
+    showWelcomeModal,
+    showBetModal,
+    showAuthModal,
+    showWaitlist,
+    showDetail,
+    setIsRealMode,
+  ]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -587,8 +630,11 @@ export default function App() {
     }
   };
 
+  const feedIdx = markets.length ? Math.min(Math.max(0, currentIndex), markets.length - 1) : 0;
+  const showFeedArrows = currentView === 'feed' && markets.length > 0;
+
   return (
-    <div className="h-screen w-full bg-black text-white overflow-hidden flex flex-col font-sans selection:bg-emerald-500/30">
+    <div className="touch-ui h-screen w-full bg-black text-white overflow-hidden flex flex-col font-sans selection:bg-emerald-500/30">
       {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-[60] p-4 flex items-center justify-between bg-black/20 lg:bg-gradient-to-b lg:from-black/90 lg:to-transparent backdrop-blur-md">
         <div className="flex items-center gap-6 lg:gap-12 w-full max-w-[1400px] mx-auto">
@@ -606,7 +652,7 @@ export default function App() {
                 <button 
                   onClick={() => setShowCategoryDropdown(!showCategoryDropdown)}
                   className={cn(
-                    "flex items-center gap-2 px-3 py-1.5 rounded-full transition-all text-sm font-medium",
+                    "touch-chip flex items-center gap-2 px-3 py-1.5 rounded-full transition-all text-sm font-medium",
                     selectedCategory 
                       ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20" 
                       : "bg-zinc-900/80 text-zinc-300 hover:bg-zinc-800 border border-white/5"
@@ -679,7 +725,7 @@ export default function App() {
                 <div className="flex items-center gap-2">
                   <button 
                     onClick={() => setShowTopUpModal(true)}
-                    className="flex items-center gap-2 bg-zinc-900/80 px-3 py-1.5 rounded-full border border-white/5 whitespace-nowrap hover:bg-zinc-800 transition-colors"
+                    className="touch-chip flex items-center gap-2 bg-zinc-900/80 px-3 py-1.5 rounded-full border border-white/5 whitespace-nowrap hover:bg-zinc-800 transition-colors"
                   >
                     <Wallet size={14} className="text-emerald-500" />
                     <span className="text-sm font-bold">{formatPrice(isRealMode ? user!.balance : demoBalance, language)}</span>
@@ -757,15 +803,49 @@ export default function App() {
         </aside>
 
         {/* Main Content Area */}
-        <main className="flex-1 relative overflow-hidden flex justify-center items-center p-4 lg:p-8">
-          <div className="w-full max-w-[500px] h-full lg:h-auto lg:aspect-[9/16] lg:max-h-[calc(100vh-120px)] relative bg-zinc-950 shadow-2xl shadow-black rounded-3xl overflow-hidden">
+        <main className="flex-1 relative overflow-hidden flex justify-center items-center p-0 lg:p-8">
+          <div className="touch-main-frame w-full max-w-[500px] h-full lg:h-auto lg:aspect-[9/16] lg:max-h-[calc(100vh-120px)] relative bg-zinc-950 shadow-2xl shadow-black rounded-none lg:rounded-3xl overflow-hidden">
             {renderView()}
+            {showFeedArrows && (
+              <div
+                role="group"
+                aria-label={t.feedArrowNav}
+                className="absolute left-2 md:left-3 top-1/2 -translate-y-1/2 z-[70] hidden md:flex flex-col gap-2 pointer-events-auto"
+              >
+                <button
+                  type="button"
+                  aria-label={t.prevMarket}
+                  disabled={feedIdx <= 0}
+                  onClick={() => handleSwipe('down')}
+                  className={cn(
+                    'touch-arrow-btn p-2 rounded-full bg-zinc-900/85 border border-white/10 text-white shadow-lg',
+                    'hover:bg-zinc-800 hover:border-white/20 transition-colors',
+                    'disabled:opacity-25 disabled:pointer-events-none'
+                  )}
+                >
+                  <ChevronUp size={22} strokeWidth={2.5} />
+                </button>
+                <button
+                  type="button"
+                  aria-label={t.nextMarket}
+                  disabled={feedIdx >= markets.length - 1}
+                  onClick={() => handleSwipe('up')}
+                  className={cn(
+                    'touch-arrow-btn p-2 rounded-full bg-zinc-900/85 border border-white/10 text-white shadow-lg',
+                    'hover:bg-zinc-800 hover:border-white/20 transition-colors',
+                    'disabled:opacity-25 disabled:pointer-events-none'
+                  )}
+                >
+                  <ChevronDown size={22} strokeWidth={2.5} />
+                </button>
+              </div>
+            )}
           </div>
         </main>
       </div>
 
       {/* Bottom Nav (Mobile Only) */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-black/80 backdrop-blur-xl border-t border-white/5 px-6 py-3 flex justify-between items-center">
+      <nav className="touch-bottom-nav lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-black/80 backdrop-blur-xl border-t border-white/5 px-4 py-3 flex justify-between items-center">
         <NavButton 
           active={currentView === 'feed'} 
           icon={<TrendingUp size={24} />} 
@@ -783,7 +863,7 @@ export default function App() {
             if (!isLoggedIn) setShowAuthModal(true);
             else setCurrentView('create');
           }}
-          className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-black -mt-8 shadow-xl shadow-white/10 active:scale-90 transition-transform"
+          className="touch-fab w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-black -mt-8 shadow-xl shadow-white/10 active:scale-90 transition-transform"
         >
           <Plus size={28} />
         </button>
