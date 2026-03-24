@@ -706,15 +706,15 @@ app.get("/api/markets/:id", async (req: AuthenticatedRequest, res) => {
     }
   });
 
-  if (!market) return res.status(404).json({ error: "Market not found" });
+    if (!market) return res.status(404).json({ error: "Market not found" });
 
-  const formattedMarket = {
-    ...market,
-    userLiked: market.likes ? market.likes.length > 0 : false,
-    userSaved: market.saves ? market.saves.length > 0 : false,
-    likes: undefined,
-    saves: undefined
-  };
+    const formattedMarket = {
+      ...market,
+      userLiked: market.likes ? market.likes.length > 0 : false,
+      userSaved: market.saves ? market.saves.length > 0 : false,
+      likes: undefined,
+      saves: undefined
+    };
 
   res.json(formattedMarket);
   } catch (error) {
@@ -1596,6 +1596,33 @@ app.get("/api/users/:id/saves", requireAuth, requireSelfOrAdmin("id"), async (re
         _count: {
           select: { bets: true, comments: true, likes: true }
         }
+      } },
+      orderBy: { id: 'desc' }
+    });
+    res.json(saves.map(s => s.market));
+  } catch (error) {
+    console.error("User saves error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Payment Endpoints
+app.post("/api/payments/create", async (req, res) => {
+  const { userId, amount, currency = "USD" } = req.body;
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const orderId = `order_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Create payment record in DB
+    const payment = await prisma.payment.create({
+      data: {
+        userId,
+        amount: Number(amount),
+        currency,
+        orderId,
+        status: "waiting"
       }
     } },
     orderBy: { id: 'desc' }
