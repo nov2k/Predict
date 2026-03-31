@@ -1,42 +1,58 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Predict
 
-# Run and deploy your AI Studio app
+Full-stack prediction market app with:
+- React + Vite frontend
+- Express + Prisma backend
+- Polymarket feed/trading integration
+- Admin workflows for video overlays and feed publishing
 
-This contains everything you need to run your app locally.
+## Prerequisites
 
-View your app in AI Studio: https://ai.studio/apps/36a026eb-579e-4947-975f-970548a91fa8
+- Node.js 20+
+- npm
+- PostgreSQL (or another DB URL compatible with `prisma/schema.prisma`)
+
+## Local Setup
+
+1. Install dependencies:
+   - `npm install`
+2. Create env file:
+   - `cp .env.example .env`
+3. Fill required values in `.env`:
+   - `DATABASE_URL`
+   - `JWT_SECRET`
+   - `APP_URL` (for payment callback URLs)
+   - optional auth/payments/polymarket variables as needed
+4. Sync database schema:
+   - `npx prisma db push`
+5. (Optional) seed demo data:
+   - `npx prisma db seed`
 
 ## Run Locally
 
-**Prerequisites:**  Node.js
+- Development (API + frontend via Vite middleware):
+  - `npm run dev`
+- Production build:
+  - `npm run build`
+- Start production server:
+  - `npm run start`
 
+## Quality Checks
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+- Type check:
+  - `npm run lint`
 
-## Polymarket integration
+## Important Endpoints
 
-This project now exposes backend endpoints for Polymarket market data and trading.
+- Health: `/api/health`
+- Public feed: `/api/markets`
+- Polymarket public data: `/api/polymarket/markets`, `/api/polymarket/markets/:id`
+- Admin feed events: `/api/admin/feed-events`
+- Admin video/publish controls: `/api/admin/markets/:id/video`
 
-- Public market data (no API keys): `/api/polymarket/markets`, `/api/polymarket/markets/:id`, `/api/polymarket/orderbook/:tokenId`
-- Trading (requires server-side credentials): `/api/polymarket/orders/*`
+## Env Notes
 
-To enable trading endpoints, set these variables in `.env`:
-
-- `POLYMARKET_PRIVATE_KEY` (wallet private key)
-- `POLYMARKET_SIGNATURE_TYPE` (`0` for EOA, `1`/`2` for proxy/safe accounts)
-- `POLYMARKET_FUNDER_ADDRESS` (optional for EOA, recommended for proxy accounts)
-- Optional pre-generated API creds: `POLYMARKET_API_KEY`, `POLYMARKET_API_SECRET`, `POLYMARKET_API_PASSPHRASE`
-
-If API creds are not supplied but `POLYMARKET_PRIVATE_KEY` is present, the backend derives creds automatically on first trading call.
-
-## Admin & payments (env)
-
-- **`ADMIN_EMAILS`** — comma-separated emails that get role `ADMIN` on register / Google sign-up (required if you relied on the old hardcoded list).
-- **`NOWPAYMENTS_API_KEY`** — omit only in dev; production without it returns 503 unless `ALLOW_MOCK_PAYMENTS=true`.
-- **`MAX_DEPOSIT_AMOUNT`** — optional USD cap per invoice (default 100000).
+- `ADMIN_EMAILS`: comma-separated list of emails that should receive `ADMIN` role.
+- `NOWPAYMENTS_API_KEY`: required for real invoice creation in production.
+- `NOWPAYMENTS_IPN_SECRET`: required for validating payment webhooks.
+- `POLYMARKET_*`: required only for trading endpoints (`/api/polymarket/orders/*`).

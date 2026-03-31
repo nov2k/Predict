@@ -1589,15 +1589,18 @@ app.get("/api/users/:id/bets", requireAuth, requireSelfOrAdmin("id"), async (req
 
 app.get("/api/users/:id/saves", requireAuth, requireSelfOrAdmin("id"), async (req, res) => {
   try {
-  const saves = await prisma.save.findMany({
-    where: { userId: req.params.id },
-    include: { market: {
+    const saves = await prisma.save.findMany({
+      where: { userId: req.params.id },
       include: {
-        _count: {
-          select: { bets: true, comments: true, likes: true }
+        market: {
+          include: {
+            _count: {
+              select: { bets: true, comments: true, likes: true }
+            }
+          }
         }
-      } },
-      orderBy: { id: 'desc' }
+      },
+      orderBy: { id: "desc" }
     });
     res.json(saves.map(s => s.market));
   } catch (error) {
@@ -1605,35 +1608,6 @@ app.get("/api/users/:id/saves", requireAuth, requireSelfOrAdmin("id"), async (re
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
-// Payment Endpoints
-app.post("/api/payments/create", async (req, res) => {
-  const { userId, amount, currency = "USD" } = req.body;
-  try {
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    const orderId = `order_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    // Create payment record in DB
-    const payment = await prisma.payment.create({
-      data: {
-        userId,
-        amount: Number(amount),
-        currency,
-        orderId,
-        status: "waiting"
-      }
-    } },
-    orderBy: { id: 'desc' }
-  });
-  res.json(saves.map(s => s.market));
-  } catch (error) {
-    console.error("User saves error:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
 // Payment Endpoints
 app.post("/api/payments/create", requireAuth, paymentCreateLimiter, async (req: AuthenticatedRequest, res) => {
   const { amount, currency = "USD" } = req.body;

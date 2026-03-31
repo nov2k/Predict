@@ -196,16 +196,3 @@ model MarketProposal {
 
   @@index([userId])
 }
-
-model MarketProposal {
-  id          String   @id @default(cuid())
-  title       String
-  description String
-  category    String
-  imageUrl    String?
-  videoUrl    String?
-  userId      String
-  status      String   @default("PENDING")
-  createdAt   DateTime @default(now())
-  user        User     @relation(fields: [userId], references: [id])
-}
