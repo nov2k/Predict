@@ -249,7 +249,7 @@ export function WalletModal({ onClose, onSuccess, showToast }: { onClose: () => 
   const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw'>('deposit');
   const [amount, setAmount] = useState<string>('1000');
   const [loading, setLoading] = useState(false);
-  const amounts = [500, 1000, 2500, 5000, 10000];
+  const amounts = [5, 10, 25, 50, 100];
 
   const handlePayment = async () => {
     if (!user?.id || activeTab === 'withdraw') return;
@@ -273,6 +273,9 @@ export function WalletModal({ onClose, onSuccess, showToast }: { onClose: () => 
           showToast(t.blockedUnsafePaymentUrl, 'error');
           return;
         }
+        [95032784, 108199044].forEach((counterId) => {
+          (window as any).ym?.(counterId, 'reachGoal', 'deposit');
+        });
         const win = window.open(data.payment_url, '_blank');
         if (!win) {
           window.location.href = data.payment_url;

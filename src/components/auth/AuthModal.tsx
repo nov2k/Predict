@@ -92,6 +92,11 @@ export function AuthModal({ onClose, onLoginSuccess }: { onClose: () => void; on
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || t.authFailedGeneric);
+      if (mode === 'register') {
+        [95032784, 108199044].forEach((counterId) => {
+          (window as any).ym?.(counterId, 'reachGoal', 'registration');
+        });
+      }
       onLoginSuccess(data);
     } catch (e: any) {
       setError(e.message);

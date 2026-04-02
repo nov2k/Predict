@@ -1595,19 +1595,20 @@ app.get("/api/users/:id/saves", requireAuth, requireSelfOrAdmin("id"), async (re
         market: {
           include: {
             _count: {
-              select: { bets: true, comments: true, likes: true }
-            }
-          }
-        }
+              select: { bets: true, comments: true, likes: true },
+            },
+          },
+        },
       },
-      orderBy: { id: "desc" }
+      orderBy: { id: "desc" },
     });
-    res.json(saves.map(s => s.market));
+    res.json(saves.map((s) => s.market));
   } catch (error) {
     console.error("User saves error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
 // Payment Endpoints
 app.post("/api/payments/create", requireAuth, paymentCreateLimiter, async (req: AuthenticatedRequest, res) => {
   const { amount, currency = "USD" } = req.body;
