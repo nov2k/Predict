@@ -1,6 +1,6 @@
 # Predict: доступ к серверам и инфраструктура
 
-Документ описывает, как подключиться к хостам, где лежит код, конфиги и как перезапускать сервис. **Пароли и ключи в репозиторий и в общие инструкции не вносятся** — храните их в менеджере секретов или у администратора.
+**Внимание:** в этом документе указан **пароль SSH** к продакшен-серверу. Не публикуйте файл в открытый доступ; при утечке смените пароль на сервере. Секреты приложения (**JWT**, **ключи NOWPayments**, **приватный ключ Polymarket** и т.д.) хранятся **только** в файле `/opt/predict/.env` на сервере — их сюда не копируйте и не коммитьте.
 
 ---
 
@@ -12,8 +12,6 @@
 | Основная ветка | `main` |
 | Каталог приложения на сервере | `/opt/predict` |
 
-Клонирование (пример):
-
 ```bash
 git clone git@github.com:nov2k/Predict.git
 cd Predict
@@ -21,141 +19,151 @@ cd Predict
 
 ---
 
-## 2. Продакшен-сервер (текущий DNS `predi.club`)
+## 2. Продакшен-сервер (`predi.club`)
 
 | Параметр | Значение |
 |----------|----------|
-| Хост (пример) | `srv1325863` (имя может отличаться) |
+| Имя хоста (пример) | `srv1325863` |
 | Публичный IPv4 | `72.62.37.201` |
-| Пользователь | `root` (или отдельный deploy-пользователь, если настроен) |
-| Приложение | Node.js + Express (`server.ts`), React SPA из `dist/` |
-| Порт приложения | `3025` (внутренний, слушает `0.0.0.0`) |
-| Процесс-менеджер | **PM2**, имя процесса: `predict` |
-| База данных | **PostgreSQL** (локально на хосте), строка подключения в `.env` → `DATABASE_URL` |
-| Вход с интернета | HTTPS через **Traefik** (Docker) → прокси на `127.0.0.1:3025` |
+| Пользователь SSH | `root` |
+| **Пароль SSH (root)** | `9923DLEIWAN2002q-` |
+| Приложение | Node.js + Express (`server.ts`), React из `dist/` |
+| Внутренний порт приложения | `3025` (`0.0.0.0`) |
+| PM2 | процесс **`predict`** |
+| БД | PostgreSQL на `localhost`, параметры в **`/opt/predict/.env`** → `DATABASE_URL` |
+| Снаружи | HTTPS через **Traefik** (Docker) → `127.0.0.1:3025` |
 
-### 2.1. Подключение по SSH
+### 2.1. Подключение по SSH (интерактивно)
+
+Введите пароль, когда система запросит `password`:
 
 ```bash
 ssh root@72.62.37.201
+# Password: 9923DLEIWAN2002q-
 ```
 
-Рекомендуется **SSH-ключ** вместо пароля: добавьте публичный ключ в `~/.ssh/authorized_keys` на сервере.
+С Windows (PowerShell / CMD) — то же самое; при первом подключении ответьте `yes` на вопрос о fingerprint ключа хоста.
 
-### 2.2. Где что лежит на этом сервере
+### 2.2. Подключение без запроса пароля (пакет `sshpass`)
 
-| Путь / объект | Назначение |
-|---------------|------------|
-| `/opt/predict/` | Рабочая копия приложения (код, `package.json`, `prisma/`, `src/`, и т.д.) |
-| `/opt/predict/.env` | **Секреты и конфигурация** (не в git): `DATABASE_URL`, `JWT_SECRET`, `APP_URL`, ключи платежей, Polymarket и др. |
+Удобно для скриптов (Linux / macOS с установленным `sshpass`):
+
+```bash
+sshpass -p '9923DLEIWAN2002q-' ssh -o StrictHostKeyChecking=no root@72.62.37.201
+```
+
+Копирование каталога с сервера (пример):
+
+```bash
+sshpass -p '9923DLEIWAN2002q-' scp -r root@72.62.37.201:/opt/predict/./docs ./backup-docs
+```
+
+**Рекомендация:** после настройки доступа добавьте **SSH-ключ** в `~/.ssh/authorized_keys` на сервере и отключите вход по паролю или смените пароль.
+
+### 2.3. Где лежат конфиги и код
+
+| Путь | Назначение |
+|------|------------|
+| **`/opt/predict/.env`** | Главный конфиг приложения: `DATABASE_URL`, `JWT_SECRET`, `APP_URL`, `PORT`, `GOOGLE_CLIENT_ID`, `NOWPAYMENTS_*`, `POLYMARKET_*`, прокси и т.д. **Файл не в git.** Редактировать на сервере: `nano /opt/predict/.env` |
 | `/opt/predict/.env.example` | Шаблон переменных (в репозитории) |
-| `/opt/predict/dist/` | Собранный фронтенд (`npm run build`) |
-| `/opt/predict/public/uploads/` | Загруженные видео (если используется локальное хранилище) |
+| `/opt/predict/server.ts` | Backend Express, маршруты API |
+| `/opt/predict/src/` | Исходники React |
 | `/opt/predict/prisma/schema.prisma` | Схема БД Prisma |
-| `~/.pm2/` | Данные PM2, логи процессов |
+| `/opt/predict/dist/` | Сборка фронта (`npm run build`) |
+| `/opt/predict/public/uploads/` | Загруженные видео |
+| `~/.pm2/` | Логи и дампы PM2 |
 
-### 2.3. Docker и домен (HTTPS)
+Формат строки БД в `.env` (пример структуры, **реальные логин и пароль только в файле на сервере**):
 
-На этом хосте порты **80** и **443** заняты стеком **n8n + Traefik** (типичный путь: каталог проекта Docker Compose).
+```text
+DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/predictdb?schema=public
+```
+
+Подключение к PostgreSQL **на самом сервере** (после чтения пароля из `.env`):
+
+```bash
+# на сервере
+sudo -u postgres psql -d predictdb
+# или с клиентом psql, подставив данные из DATABASE_URL:
+# PGPASSWORD='***из .env***' psql -h localhost -U predictuser -d predictdb
+```
+
+### 2.4. Docker, Traefik, HTTPS
 
 | Что | Где |
 |-----|-----|
 | Compose Traefik | `/docker/n8n/docker-compose.yml` |
-| Резервная копия compose (если создавалась) | `/docker/n8n/docker-compose.yml.bak.*` |
-| Сертификаты Let's Encrypt | том Docker `traefik_data` → в контейнере `/letsencrypt/acme.json` |
-| Прокси для приложения | контейнер **`predi-proxy`** (nginx внутри сети `n8n_default`), маршрут Traefik `Host("predi.club")` → бэкенд порт 80 контейнера → `host.docker.internal:3025` |
+| Резерв копии compose | `/docker/n8n/docker-compose.yml.bak.*` |
+| Сертификаты Let's Encrypt | Docker volume `traefik_data` → в контейнере `/letsencrypt/acme.json` |
+| Прокси к приложению | контейнер **`predi-proxy`**, сеть `n8n_default`, правило Traefik `Host("predi.club")` → nginx в контейнере → `host.docker.internal:3025` |
 
-ACME: для выпуска сертификата используется resolver **`mytlschallenge`** (в compose настроен challenge, при необходимости — HTTP-01 на entrypoint `web`).
-
-### 2.4. Команды обслуживания (прод)
-
-Выполнять из `/opt/predict` под пользователем, от которого крутится PM2 (часто `root`):
+### 2.5. Обслуживание приложения
 
 ```bash
 cd /opt/predict
 
-# зависимости и сборка после обновления кода
 npm ci
 npm run lint
 npm run build
 
-# схема БД (при изменениях Prisma)
 npx prisma db push
-# или миграции, если используются:
-# npx prisma migrate deploy
+# или: npx prisma migrate deploy
 
-# перезапуск приложения
 pm2 restart predict
-
-# логи
 pm2 logs predict --lines 100
-
-# автозапуск PM2 после перезагрузки ОС (если настраивали)
-pm2 save
-pm2 startup
 ```
 
-Проверка здоровья API локально на сервере:
+Проверка API:
 
 ```bash
 curl -sS http://127.0.0.1:3025/api/health
 ```
 
-Ожидаемый ответ: JSON с `"status":"ok"` и подключением к БД.
+---
+
+## 3. Другой (предыдущий) хост
+
+Ранее приложение могло быть на другом IP с тем же путём **`/opt/predict`**, Nginx (`/etc/nginx/sites-available/`), PM2 `predict`. Учётные данные SSH к тому хосту — у администратора; в этом файле описан сервер **`72.62.37.201`**.
 
 ---
 
-## 3. Дополнительный / предыдущий хост
+## 4. Переменные в `.env` (имена)
 
-Ранее тот же домен мог указывать на **другой** IP; там также разворачивалось приложение в **`/opt/predict`**, обратный прокси — **Nginx** (сайт для `predi.club` в `sites-available` / `sites-enabled`), процесс **`predict`** в PM2. Если этот сервер ещё используется для бэкапов или параллельного доступа — пути те же: **`.env` только на машине**, не коммитить.
-
-При полном переносе DNS на новый IP старый хост можно оставить выключенным для внешнего трафика или использовать только для внутренних задач — по политике команды.
-
----
-
-## 4. Переменные окружения (кратко)
-
-Файл **`/opt/predict/.env`** (на каждом сервере свой):
+Смотрите актуальные значения только в **`/opt/predict/.env`** на сервере.
 
 | Переменная | Назначение |
 |------------|------------|
-| `DATABASE_URL` | PostgreSQL для Prisma |
+| `DATABASE_URL` | PostgreSQL |
 | `JWT_SECRET` | Подпись JWT |
-| `APP_URL` | Базовый URL сайта (коллбеки платежей, ссылки) |
-| `PORT` | Порт Node (по умолчанию часто `3000` в коде; на проде может быть `3025` — смотрите фактическое значение в `.env`) |
-| `GOOGLE_CLIENT_ID` | OAuth Google |
-| `ADMIN_EMAILS` | Список email админов через запятую |
-| `NOWPAYMENTS_*` | Платежи NOWPayments |
-| `CORS_ORIGINS` | Опционально: разрешённые Origin для API с другого домена |
-| `POLYMARKET_*` | Интеграция Polymarket (см. `.env.example`) |
-
-Полный список и комментарии — в **`.env.example`** в репозитории.
+| `APP_URL` | Базовый URL (коллбеки платежей) |
+| `PORT` | Порт Node (на проде часто `3025`) |
+| `GOOGLE_CLIENT_ID` | Google OAuth |
+| `ADMIN_EMAILS` | Админы через запятую |
+| `NOWPAYMENTS_*` | Платежи |
+| `CORS_ORIGINS` | CORS при отдельном origin фронта |
+| `POLYMARKET_*` | Polymarket / CLOB |
+| `NODE_ENV` | Обычно `production` в процессе |
 
 ---
 
-## 5. Структура репозитория (логическая)
+## 5. Структура репозитория
 
 | Путь | Содержание |
 |------|------------|
-| `server.ts` | Express: API, статика `dist/` в production, Vite middleware в dev |
-| `src/` | React-приложение |
-| `prisma/` | Схема БД и seed |
-| `public/` | Статика, загрузки |
-| `docs/` | Деплой, бэклог, вспомогательная документация |
-| `index.html` | Точка входа Vite |
-
-Скрипты в `package.json`: `npm run dev`, `npm run build`, `npm run start`, `npm run lint`.
+| `server.ts` | API и раздача `dist` в production |
+| `src/` | React |
+| `prisma/` | Схема и seed |
+| `public/` | Статика |
+| `docs/` | Документация, в т.ч. этот файл |
 
 ---
 
 ## 6. Безопасность
 
-1. Не хранить пароли SSH и содержимое `.env` в git и в общих PDF/чатах без ограничения доступа.
-2. Регулярно обновлять систему и зависимости (`npm audit`).
-3. Доступ к админке и чувствительным API — только авторизованным пользователям (см. код `server.ts`).
+1. Не коммитить `.env` и не вставлять в чаты полные секреты из него.
+2. Документ с паролем SSH хранить ограниченно; при компрометации — сменить пароль `root` и ключи в `.env`.
+3. Регулярно обновлять систему и `npm audit`.
 
 ---
 
-## 7. Контакты и изменения
-
-При смене IP, домена или сертификатов обновите этот документ и секреты в CI/CD. Дата генерации PDF — см. метаданные файла или системное время сборки.
+*Файлы: `docs/SERVER-INFRA-RU.md` (исходник), `docs/SERVER-INFRA-RU.pdf` (экспорт).*
